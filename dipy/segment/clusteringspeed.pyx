@@ -292,6 +292,10 @@ cdef class QuickBundles(object):
 
             aabb_creation(features, &aabb[0])
 
+            aabb[3] += <float>self.threshold
+            aabb[4] += <float>self.threshold
+            aabb[5] += <float>self.threshold
+
             for k in range(self.clusters.c_size()):
 
                 if aabb_overlap(self.clusters.centroids[k].aabb, &aabb[0]) == 1:
