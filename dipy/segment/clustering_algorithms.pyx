@@ -57,7 +57,8 @@ def peek(iterable):
     return first, iterator
 
 
-def quickbundles(streamlines, Metric metric, double threshold, long max_nb_clusters=BIGGEST_INT, ordering=None):
+def quickbundles(streamlines, Metric metric, double threshold,
+                 long max_nb_clusters=BIGGEST_INT, ordering=None, bvh=False):
     """ Clusters streamlines using QuickBundles.
 
     Parameters
@@ -73,6 +74,8 @@ def quickbundles(streamlines, Metric metric, double threshold, long max_nb_clust
         Limits the creation of bundles. (Default: inf)
     ordering : iterable of indices, optional
         Iterate through `data` using the given ordering.
+    bvh : bool
+        Boundary volume hierarchy
 
     Returns
     -------
@@ -90,6 +93,8 @@ def quickbundles(streamlines, Metric metric, double threshold, long max_nb_clust
     # Threshold of -np.inf is not supported, set it to 0
     threshold = max(threshold, 0)
 
+
+
     if ordering is None:
         ordering = xrange(len(streamlines))
 
@@ -99,7 +104,8 @@ def quickbundles(streamlines, Metric metric, double threshold, long max_nb_clust
         return ClusterMapCentroid()
 
     features_shape = shape2tuple(metric.feature.c_infer_shape(streamlines[first_idx].astype(DTYPE)))
-    cdef QuickBundles qb = QuickBundles(features_shape, metric, threshold, max_nb_clusters)
+    cdef QuickBundles qb = QuickBundles(features_shape, metric, threshold,
+                                        max_nb_clusters, bvh)
     cdef int idx
 
     for idx in ordering:

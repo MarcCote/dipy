@@ -7,6 +7,8 @@ cimport numpy as cnp
 from libc.math cimport fabs
 from cythonutils cimport Data2D, Shape, shape2tuple, tuple2shape, same_shape
 
+cdef extern from "math.h" nogil:
+    double fabs(double x)
 
 cdef extern from "stdlib.h" nogil:
     ctypedef unsigned long size_t
@@ -18,6 +20,47 @@ cdef extern from "stdlib.h" nogil:
 DTYPE = np.float32
 DEF BIGGEST_DOUBLE = 1.7976931348623157e+308  # np.finfo('f8').max
 DEF BIGGEST_INT = 2147483647  # np.iinfo('i4').max
+DEF BIGGEST_FLOAT = 3.4028235e+38  # np.finfo('f4').max
+DEF SMALLEST_FLOAT = -3.4028235e+38  # np.finfo('f4').max
+
+
+
+cdef void  aabb_creation(Data2D feature, float * aabb) nogil:
+
+
+    cdef:
+        int N = feature.shape[0], D = feature.shape[1]
+        int n, d
+        float min_[3]
+        float max_[3]
+
+    for d in range(D):
+        min_[d] = BIGGEST_FLOAT
+        max_[d] = SMALLEST_FLOAT
+        for n in range(N):
+
+            if max_[d] < feature[n, d]:
+                max_[d] = feature[n, d]
+
+            if min_[d] > feature[n, d]:
+                min_[d] = feature[n, d]
+
+        aabb[d + 3] = (max_[d] - min_[d]) / 2.0 # radius
+        aabb[d] = min_[d] + aabb[d + 3]  # center
+
+
+cdef int aabb_overlap(float * aabb1, float * aabb2) nogil:
+    """ SIMD optimized AABB-AABB test
+
+    Optimized by removing conditional branches
+    """
+    cdef:
+        int x = fabs(aabb1[0] - aabb2[0]) <= (aabb1[3] + aabb2[3])
+        int y = fabs(aabb1[1] - aabb2[1]) <= (aabb1[4] + aabb2[4])
+        int z = fabs(aabb1[2] - aabb2[2]) <= (aabb1[5] + aabb2[5])
+
+    return x & y & z;
+
 
 
 cdef class Clusters:
@@ -104,7 +147,7 @@ cdef class ClustersCentroid(Clusters):
             raise ValueError("'centroid_shape' must be a tuple or a int.")
 
         self._centroid_shape = tuple2shape(centroid_shape)
-
+        # self.aabb
         self.centroids = NULL
         self._updated_centroids = NULL
         self.eps = eps
@@ -180,6 +223,10 @@ cdef class ClustersCentroid(Clusters):
                 converged &= fabs(centroid[n, d] - updated_centroid[n, d]) < self.eps
                 centroid[n, d] = updated_centroid[n, d]
 
+        #cdef float * aabb = &self.centroids[id_cluster].aabb[0]
+
+        aabb_creation(centroid, self.centroids[id_cluster].aabb)
+
         return converged
 
     cdef int c_create_cluster(ClustersCentroid self) nogil except -1:
@@ -202,11 +249,14 @@ cdef class ClustersCentroid(Clusters):
             self.centroids[self._nb_clusters].features = <float[:self._centroid_shape.dims[0], :self._centroid_shape.dims[1]]> calloc(self._centroid_shape.size, sizeof(float))
             self._updated_centroids[self._nb_clusters].features = <float[:self._centroid_shape.dims[0], :self._centroid_shape.dims[1]]> calloc(self._centroid_shape.size, sizeof(float))
 
+        aabb_creation(self.centroids[self._nb_clusters].features, self.centroids[self._nb_clusters].aabb)
+
         return Clusters.c_create_cluster(self)
 
 
 cdef class QuickBundles(object):
-    def __init__(QuickBundles self, features_shape, Metric metric, double threshold, int max_nb_clusters=BIGGEST_INT):
+    def __init__(QuickBundles self, features_shape, Metric metric, double threshold,
+                 int max_nb_clusters=BIGGEST_INT, int bvh=0):
         self.metric = metric
         self.features_shape = tuple2shape(features_shape)
         self.threshold = threshold
@@ -214,6 +264,7 @@ cdef class QuickBundles(object):
         self.clusters = ClustersCentroid(features_shape)
         self.features = np.empty(features_shape, dtype=DTYPE)
         self.features_flip = np.empty(features_shape, dtype=DTYPE)
+        self.bvh = bvh
 
     cdef NearestCluster find_nearest_cluster(QuickBundles self, Data2D features) nogil except *:
         """ Finds the nearest cluster of a datum given its `features` vector.
@@ -232,17 +283,37 @@ cdef class QuickBundles(object):
             cnp.npy_intp k
             double dist
             NearestCluster nearest_cluster
+            float aabb[6]
 
         nearest_cluster.id = -1
         nearest_cluster.dist = BIGGEST_DOUBLE
 
-        for k in range(self.clusters.c_size()):
-            dist = self.metric.c_dist(self.clusters.centroids[k].features, features)
+        if self.bvh == 1:
 
-            # Keep track of the nearest cluster
-            if dist < nearest_cluster.dist:
-                nearest_cluster.dist = dist
-                nearest_cluster.id = k
+            aabb_creation(features, &aabb[0])
+
+            for k in range(self.clusters.c_size()):
+
+                if aabb_overlap(self.clusters.centroids[k].aabb, &aabb[0]) == 1:
+
+                    dist = self.metric.c_dist(self.clusters.centroids[k].features, features)
+
+                    # Keep track of the nearest cluster
+                    if dist < nearest_cluster.dist:
+                        nearest_cluster.dist = dist
+                        nearest_cluster.id = k
+
+        if self.bvh == 0:
+
+            for k in range(self.clusters.c_size()):
+
+                dist = self.metric.c_dist(self.clusters.centroids[k].features, features)
+
+                # Keep track of the nearest cluster
+                if dist < nearest_cluster.dist:
+                    nearest_cluster.dist = dist
+                    nearest_cluster.id = k
+
 
         return nearest_cluster
 
@@ -319,3 +390,19 @@ cdef class QuickBundles(object):
 
         """
         self.clusters.c_update(cluster_id)
+
+
+def evaluate_aabbb_checks():
+    cdef:
+        Data2D feature1 = np.array([[1, 0, 0], [1, 1, 0], [1 + np.sqrt(2)/2., 1 + np.sqrt(2)/2., 0]], dtype='f4')
+        Data2D feature2 = np.array([[1, 0, 0], [1, 1, 0], [1 + np.sqrt(2)/2., 1 + np.sqrt(2)/2., 0]], dtype='f4') + np.array([0.5, 0, 0], dtype='f4')
+        float[6] aabb1
+        float[6] aabb2
+        int res
+
+    aabb_creation(feature1, &aabb1[0])
+    aabb_creation(feature2, &aabb2[0])
+
+    res = aabb_overlap(&aabb1[0], &aabb2[0])
+
+    return np.asarray(aabb1), np.asarray(aabb2), res

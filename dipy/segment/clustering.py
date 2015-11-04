@@ -469,11 +469,11 @@ class QuickBundles(Clustering):
                         tractography simplification, Frontiers in Neuroscience,
                         vol 6, no 175, 2012.
     """
-
     def __init__(self, threshold, metric="MDF_12points",
-                 max_nb_clusters=np.iinfo('i4').max):
+                 max_nb_clusters=np.iinfo('i4').max, bvh=False):
         self.threshold = threshold
         self.max_nb_clusters = max_nb_clusters
+        self.bvh = bvh
 
         if isinstance(metric, Metric):
             self.metric = metric
@@ -504,7 +504,7 @@ class QuickBundles(Clustering):
         cluster_map = quickbundles(streamlines, self.metric,
                                    threshold=self.threshold,
                                    max_nb_clusters=self.max_nb_clusters,
-                                   ordering=ordering)
+                                   ordering=ordering, bvh=self.bvh)
 
         cluster_map.refdata = streamlines
         return cluster_map
