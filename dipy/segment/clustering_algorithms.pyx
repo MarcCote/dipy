@@ -8,6 +8,7 @@ from cythonutils cimport Data2D, shape2tuple
 from metricspeed cimport Metric
 from clusteringspeed cimport ClustersCentroid, Centroid, QuickBundles
 from dipy.segment.clustering import ClusterMapCentroid, ClusterCentroid
+from dipy.tracking import Streamlines
 
 cdef extern from "stdlib.h" nogil:
     ctypedef unsigned long size_t
@@ -56,6 +57,43 @@ def peek(iterable):
     iterator = itertools.chain([first], iterable)
     return first, iterator
 
+def quickbundles_compactlist(streamlines, Metric metric, double threshold, long max_nb_clusters=BIGGEST_INT, ordering=None):
+    if not isinstance(streamlines, Streamlines):
+        raise ValueError("`streamlines` must be a ``Streamlines`` object")
+
+    # Threshold of np.inf is not supported, set it to 'biggest_double'
+    threshold = min(threshold, BIGGEST_DOUBLE)
+    # Threshold of -np.inf is not supported, set it to 0
+    threshold = max(threshold, 0)
+
+    if ordering is None:
+        ordering = np.arange(len(streamlines))
+
+    # Check if `ordering` or `streamlines` are empty
+    first_idx = ordering[0] if len(ordering) > 0 else None
+    if first_idx is None or len(streamlines) == 0:
+        return ClusterMapCentroid()
+
+    features_shape = shape2tuple(metric.feature.c_infer_shape(streamlines[first_idx].astype(DTYPE)))
+    cdef QuickBundles qb = QuickBundles(features_shape, metric, threshold, max_nb_clusters)
+    cdef int idx, i
+    cdef int cluster_id
+    cdef int nb_streamlines = len(streamlines)
+    cdef long[:] c_ordering = np.asarray(ordering)
+    cdef long[:] offsets = np.asarray(streamlines._offsets)
+    cdef long[:] lengths = np.asarray(streamlines._lengths)
+    cdef Data2D data = streamlines._data
+
+    with nogil:
+        for i in range(c_ordering.shape[0]):
+            idx = c_ordering[i]
+            cluster_id = qb.assignment_step(data[offsets[idx]:offsets[idx]+lengths[idx]], idx)
+            # The update step is performed right after the assignement step instead
+            # of after all streamlines have been assigned like k-means algorithm.
+            qb.update_step(cluster_id)
+
+    return clusters_centroid2clustermap_centroid(qb.clusters)
+
 
 def quickbundles(streamlines, Metric metric, double threshold,
                  long max_nb_clusters=BIGGEST_INT, ordering=None, bvh=False):
@@ -88,6 +126,10 @@ def quickbundles(streamlines, Metric metric, double threshold,
                         tractography simplification, Frontiers in Neuroscience,
                         vol 6, no 175, 2012.
     """
+
+    if isinstance(streamlines, Streamlines):
+        return quickbundles_compactlist(streamlines, metric, threshold, max_nb_clusters, ordering)
+
     # Threshold of np.inf is not supported, set it to 'biggest_double'
     threshold = min(threshold, BIGGEST_DOUBLE)
     # Threshold of -np.inf is not supported, set it to 0

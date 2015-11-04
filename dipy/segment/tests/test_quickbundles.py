@@ -10,6 +10,8 @@ from dipy.segment.clustering import QuickBundles
 
 import dipy.segment.metric as dipymetric
 from dipy.segment.clustering_algorithms import quickbundles
+
+from dipy.tracking import Streamlines
 import dipy.tracking.streamline as streamline_utils
 
 
@@ -123,6 +125,63 @@ def test_quickbundles_2D():
     assert_array_equal(list(map(len, clusters)), np.ones(len(data)))
     assert_array_equal([idx for cluster in clusters
                         for idx in cluster.indices], range(len(data)))
+
+
+def test_quickbundles_2D_compactlist():
+    # Test quickbundles clustering using 2D points and the Eulidean metric.
+    rng = np.random.RandomState(42)
+    data = []
+    data += [rng.randn(1, 2) + np.array([0, 0]) for i in range(1)]
+    data += [rng.randn(1, 2) + np.array([10, 10]) for i in range(2)]
+    data += [rng.randn(1, 2) + np.array([-10, 10]) for i in range(3)]
+    data += [rng.randn(1, 2) + np.array([10, -10]) for i in range(4)]
+    data += [rng.randn(1, 2) + np.array([-10, -10]) for i in range(5)]
+    data = Streamlines(np.array(data, dtype=dtype))
+
+    clusters_truth = [[0], [1, 2], [3, 4, 5], [6, 7, 8, 9], [10, 11, 12, 13, 14]]
+
+    # # Uncomment the following to visualize this test
+    # import pylab as plt
+    # plt.plot(*zip(*data[0:1, 0]), linestyle='None', marker='s')
+    # plt.plot(*zip(*data[1:3, 0]), linestyle='None', marker='o')
+    # plt.plot(*zip(*data[3:6, 0]), linestyle='None', marker='+')
+    # plt.plot(*zip(*data[6:10, 0]), linestyle='None', marker='.')
+    # plt.plot(*zip(*data[10:, 0]), linestyle='None', marker='*')
+    # plt.show()
+
+    # Theorically using a threshold above the following value will not
+    # produce expected results.
+    threshold = np.sqrt(2*(10**2))-np.sqrt(2)
+    metric = dipymetric.SumPointwiseEuclideanMetric()
+    ordering = np.arange(len(data))
+    for i in range(100):
+        rng.shuffle(ordering)
+        clusters = quickbundles(data, metric, threshold, ordering=ordering)
+
+        # Check if clusters are the same as 'clusters_truth'
+        for cluster in clusters:
+            # Find the corresponding cluster in 'clusters_truth'
+            for cluster_truth in clusters_truth:
+                if cluster_truth[0] in cluster.indices:
+                    assert_equal(sorted(cluster.indices), sorted(cluster_truth))
+
+    # Cluster each cluster again using a small threshold
+    for cluster in clusters:
+        subclusters = quickbundles(data, metric, threshold=0, ordering=cluster.indices)
+        assert_equal(len(subclusters), len(cluster))
+        assert_equal(sorted(itertools.chain(*subclusters)), sorted(cluster.indices))
+
+    # A very large threshold should produce only 1 cluster
+    clusters = quickbundles(data, metric, threshold=np.inf)
+    assert_equal(len(clusters), 1)
+    assert_equal(len(clusters[0]), len(data))
+    assert_array_equal(clusters[0].indices, range(len(data)))
+
+    # A very small threshold should produce only N clusters where N=len(data)
+    clusters = quickbundles(data, metric, threshold=0)
+    assert_equal(len(clusters), len(data))
+    assert_array_equal(list(map(len, clusters)), np.ones(len(data)))
+    assert_array_equal([idx for cluster in clusters for idx in cluster.indices], range(len(data)))
 
 
 def test_quickbundles_streamlines():
