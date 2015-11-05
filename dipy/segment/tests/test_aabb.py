@@ -117,7 +117,7 @@ def test_qbundles_full_brain():
 # 30
 # 329 vs 210 1.5X
 # 20
-# 2006s (1110 clusters) vs 1218s (1103 clusters)
+# 2006s (1110 clusters) vs 1218s (1103 clusters) 1.6X
 
 
 test_qbundles_full_brain()
