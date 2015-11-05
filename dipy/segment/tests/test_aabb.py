@@ -11,24 +11,23 @@ def test_aabb_checks():
     A, B, res = evaluate_aabbb_checks()
     npt.assert_equal(res, 1)
 
-def show_streamlines(streamlines, centroids):
+
+def show_streamlines(streamlines=None, centroids=None):
 
     from dipy.viz import actor, window
 
     ren = window.Renderer()
 
-    stream_actor = actor.line(streamlines)
+    if streamlines is not None:
+        stream_actor = actor.line(streamlines)
+        ren.add(stream_actor)
+        window.show(ren)
+        ren.clear()
 
-    ren.add(stream_actor)
-
-    window.show(ren)
-
-    ren.clear()
-
-    stream_actor2 = actor.line(centroids)
-
-    ren.add(stream_actor2)
-    window.show(ren)
+    if centroids is not None:
+        stream_actor2 = actor.line(centroids)
+        ren.add(stream_actor2)
+        window.show(ren)
 
 
 def test_qbundles_aabb():
@@ -50,7 +49,7 @@ def test_qbundles_aabb():
 
     from time import time
 
-    qb = QuickBundles(5, bvh=False)
+    qb = QuickBundles(2.5, bvh=False)
     t = time()
     clusters = qb.cluster(rstreamlines)
     print('Without BVH {}'.format(time() - t))
@@ -58,7 +57,7 @@ def test_qbundles_aabb():
 
     show_streamlines(rstreamlines, clusters.centroids)
 
-    qb = QuickBundles(5, bvh=True)
+    qb = QuickBundles(2.5, bvh=True)
     t = time()
     clusters = qb.cluster(rstreamlines)
     print('With BVH {}'.format(time() - t))
@@ -70,4 +69,57 @@ def test_qbundles_aabb():
     #set_trace()
 
 
-test_qbundles_aabb()
+#test_qbundles_aabb()
+
+def test_qbundles_full_brain():
+
+    fname = '/home/eleftherios/Data/Elef_Test_RecoBundles/tracts.trk'
+
+    #streams, hdr = nib.trackvis.read(fname)
+    obj = nib.streamlines.load(fname)
+    streamlines = obj.streamlines
+
+    from dipy.tracking.streamline import select_random_set_of_streamlines
+    streamlines = select_random_set_of_streamlines(streamlines,
+                                                   len(streamlines))
+
+    print(len(streamlines))
+
+    rstreamlines = set_number_of_points(streamlines, 20)
+
+    del streamlines
+
+    from time import time
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+
+    threshold = 20
+
+    qb = QuickBundles(threshold, metric=AveragePointwiseEuclideanMetric(), bvh=False)
+    t = time()
+    clusters = qb.cluster(rstreamlines)
+    print('Without BVH {}'.format(time() - t))
+    print(len(clusters))
+
+    show_streamlines(None, clusters.centroids)
+
+    qb = QuickBundles(threshold, metric=AveragePointwiseEuclideanMetric(), bvh=True)
+    t = time()
+    clusters = qb.cluster(rstreamlines)
+    print('With BVH {}'.format(time() - t))
+    print(len(clusters))
+
+    show_streamlines(None, clusters.centroids)
+
+    from ipdb import set_trace
+    set_trace()
+
+
+# 30
+# 329 vs 210 1.5X
+# 20
+# 2006s (1110 clusters) vs 1218s (1103 clusters)
+
+
+test_qbundles_full_brain()
+
+
