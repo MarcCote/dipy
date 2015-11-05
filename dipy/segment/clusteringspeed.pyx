@@ -260,6 +260,7 @@ cdef class QuickBundles(object):
         self.metric = metric
         self.features_shape = tuple2shape(features_shape)
         self.threshold = threshold
+        self.aabb_pad = 0
         self.max_nb_clusters = max_nb_clusters
         self.clusters = ClustersCentroid(features_shape)
         self.features = np.empty(features_shape, dtype=DTYPE)
@@ -292,9 +293,9 @@ cdef class QuickBundles(object):
 
             aabb_creation(features, &aabb[0])
 
-            aabb[3] += <float>self.threshold
-            aabb[4] += <float>self.threshold
-            aabb[5] += <float>self.threshold
+            aabb[3] += <float>self.aabb_pad
+            aabb[4] += <float>self.aabb_pad
+            aabb[5] += <float>self.aabb_pad
 
             for k in range(self.clusters.c_size()):
 

@@ -73,7 +73,7 @@ def test_qbundles_aabb():
 
 def test_qbundles_full_brain():
 
-    fname = '/home/eleftherios/Data/Elef_Test_RecoBundles/tracts.trk'
+    fname = '/home/eleftherios/Data/Test_data_Jasmeen/Elef_Test_RecoBundles/tracts.trk'
 
     #streams, hdr = nib.trackvis.read(fname)
     obj = nib.streamlines.load(fname)
@@ -92,23 +92,23 @@ def test_qbundles_full_brain():
     from time import time
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
 
-    threshold = 20
+    threshold = 15
 
-    qb = QuickBundles(threshold, metric=AveragePointwiseEuclideanMetric(), bvh=False)
-    t = time()
-    clusters = qb.cluster(rstreamlines)
-    print('Without BVH {}'.format(time() - t))
-    print(len(clusters))
+#    qb = QuickBundles(threshold, metric=AveragePointwiseEuclideanMetric(), bvh=False)
+#    t = time()
+#    clusters1 = qb.cluster(rstreamlines)
+#    print('Without BVH {}'.format(time() - t))
+#    print(len(clusters1))
 
-    show_streamlines(None, clusters.centroids)
+    #show_streamlines(None, clusters1.centroids)
 
     qb = QuickBundles(threshold, metric=AveragePointwiseEuclideanMetric(), bvh=True)
     t = time()
-    clusters = qb.cluster(rstreamlines)
+    clusters2 = qb.cluster(rstreamlines)
     print('With BVH {}'.format(time() - t))
-    print(len(clusters))
+    print(len(clusters2))
 
-    show_streamlines(None, clusters.centroids)
+    show_streamlines(None, clusters2.centroids)
 
     from ipdb import set_trace
     set_trace()
@@ -118,7 +118,11 @@ def test_qbundles_full_brain():
 # 329 vs 210 1.5X
 # 20
 # 2006s (1110 clusters) vs 1218s (1103 clusters) 1.6X
-
+# 15
+# 8669 (4274 clusters) vs 4657 (4274 clusters) 1.86X
+# 15 but with 1/2 padding
+# 8669 (4274 clusters) vs 3842 (4314 clusters) 2.2X
+# 15 but with No padding
 
 test_qbundles_full_brain()
 

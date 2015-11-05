@@ -39,6 +39,7 @@ cdef class QuickBundles(object):
     cdef ClustersCentroid clusters
     cdef Metric metric
     cdef double threshold
+    cdef double aabb_pad
     cdef int max_nb_clusters
     cdef int bvh
 
