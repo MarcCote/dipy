@@ -4,6 +4,8 @@
 import numpy as np
 cimport numpy as cnp
 
+from dipy.segment.clustering import ClusterCentroid, ClusterMapCentroid
+
 from libc.math cimport fabs
 from cythonutils cimport Data2D, Shape, shape2tuple, tuple2shape, same_shape
 
@@ -339,6 +341,8 @@ cdef class QuickBundlesX(object):
     cdef Data2D features_flip
     cdef double* thresholds
     cdef int nb_levels
+    cdef object level
+    cdef object clusters
 
     def __init__(self, features_shape, levels_thresholds, Metric metric):
         self.features_shape = tuple2shape(features_shape)
@@ -354,6 +358,9 @@ cdef class QuickBundlesX(object):
 
         self.features = np.empty(features_shape, dtype=DTYPE)
         self.features_flip = np.empty(features_shape, dtype=DTYPE)
+
+        self.level = None
+        self.clusters = None
 
     def __dealloc__(self):
         # Free indices, father and children
@@ -517,6 +524,43 @@ cdef class QuickBundlesX(object):
     def __str__(self):
         #print "Printing tree..."
         return print_node(self.root)
+
+    cdef void traverse_postorder(self, CentroidNode* node, void (*visit)(QuickBundlesX, CentroidNode*)):
+        cdef int i
+        for i in range(node.nb_children):
+            self.traverse_postorder(node.children[i], visit)
+
+        visit(self, node)
+
+    cdef void _fetch_level(self, CentroidNode* node):
+        if node.level == self.level:
+            cluster = ClusterCentroid(np.asarray(node.centroid))
+            cluster.indices = np.asarray(<int[:node.size]> node.indices)
+            self.clusters.add_cluster(cluster)
+
+    def get_clusters(self, int level):
+        self.clusters = ClusterMapCentroid()
+        self.level = level
+
+        self.traverse_postorder(self.root, self._fetch_level)
+        return self.clusters
+
+
+    #def get_clusters(self, int level):
+    #    parent_stack = []
+
+    #    while len(parent_stack) > 0 or node is not None:
+    #        if node is not None:
+    #            yield node
+    #            if len(node.children) > 0:
+    #                parent_stack += node.children[1:]
+    #                node = node.children[0]
+    #            else:
+    #                node = None
+    #        else:
+    #            node = parent_stack.pop()
+
+
 
 cdef print_node(CentroidNode* node, prepend=""):
     if node == NULL:
