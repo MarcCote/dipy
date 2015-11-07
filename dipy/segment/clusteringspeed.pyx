@@ -60,9 +60,9 @@ cdef inline int aabb_overlap(float* aabb1, float* aabb2, float padding=0.) nogil
     Optimized by removing conditional branches
     """
     cdef:
-        int x = fabs(aabb1[0] - aabb2[0]) <= (aabb1[3] + aabb2[3] + 2*padding)
-        int y = fabs(aabb1[1] - aabb2[1]) <= (aabb1[4] + aabb2[4] + 2*padding)
-        int z = fabs(aabb1[2] - aabb2[2]) <= (aabb1[5] + aabb2[5] + 2*padding)
+        int x = fabs(aabb1[0] - aabb2[0]) <= (aabb1[3] + aabb2[3] + padding)
+        int y = fabs(aabb1[1] - aabb2[1]) <= (aabb1[4] + aabb2[4] + padding)
+        int z = fabs(aabb1[2] - aabb2[2]) <= (aabb1[5] + aabb2[5] + padding)
 
     return x & y & z;
 
@@ -111,7 +111,7 @@ cdef hqb_add_to_node(CentroidNode* node, Streamline* streamline, int flip):
 
 
 cdef int hqb_add_child(CentroidNode* node, Streamline* streamline):
-    print "Adding child..."
+    #print "Adding child..."
     # Create new child.
     cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/THRESHOLD_MULTIPLIER)
     #hqb_add_to_node(child, streamline, False)
@@ -121,7 +121,7 @@ cdef int hqb_add_child(CentroidNode* node, Streamline* streamline):
     node.children = <CentroidNode**> realloc(node.children, (node.nb_children+1)*sizeof(CentroidNode*))
     node.children[node.nb_children] = child
     node.nb_children += 1
-    print "Added child..."
+    #print "Added child..."
     return node.nb_children-1
 
 
@@ -165,7 +165,9 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
         cnp.npy_intp k
         NearestCluster nearest_cluster
 
+    #print "Inserting..."
     if node.threshold <= min_threshold:
+        #print "Hit the bottom!"
         hqb_add_to_node(node, streamline, False)
         return
 
@@ -173,9 +175,10 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
     nearest_cluster.dist = BIGGEST_DOUBLE
     nearest_cluster.flip = 0
 
+    #print "Comparing with centroids..."
     for k in range(node.nb_children):
         # Check streamline's aabb colides with the current child.
-        if aabb_overlap(node.children[k].aabb, streamline.aabb, node.threshold/2.):
+        if aabb_overlap(node.children[k].aabb, streamline.aabb, node.children[k].threshold):
             dist = metric.c_dist(node.children[k].centroid, streamline.features)
 
             # Keep track of the nearest cluster
@@ -190,10 +193,11 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
                 nearest_cluster.id = k
                 nearest_cluster.flip = 1
 
-    if nearest_cluster.dist > node.threshold:
+    if node.nb_children == 0 or nearest_cluster.dist > node.children[k].threshold:
         # No near cluster, create a new one.
-        print "Adding child..."
         nearest_cluster.id = hqb_add_child(node, streamline)
+        print nearest_cluster.id, node.nb_children
+        print node.children[nearest_cluster.id].nb_children
 
     hqb_insert(node.children[nearest_cluster.id], streamline, metric, min_threshold)
     hqb_update(node)
@@ -238,14 +242,13 @@ cdef class HierarchicalQuickBundles(object):
             self.root.indices = <int*> malloc(self.root.size*sizeof(int))
             self.root.indices[0] = streamline.idx
 
-            # Build AABB
-            for i in range(6):
-                self.root.aabb[i] = streamline.aabb[i]
-
             # Build centroid
             for n in range(self.root.centroid.shape[0]):
                 for d in range(self.root.centroid.shape[1]):
                     self.root.centroid[n, d] = streamline.features[n, d]
+
+            # Build AABB
+            aabb_creation(self.root.centroid, self.root.aabb)
 
             print "Done"
             return
@@ -256,7 +259,7 @@ cdef class HierarchicalQuickBundles(object):
         cdef double dist = BIGGEST_DOUBLE
         cdef double dist_flip
 
-        if aabb_overlap(self.root.aabb, streamline.aabb, self.root.threshold/2.):
+        if aabb_overlap(self.root.aabb, streamline.aabb, self.root.threshold):
             dist = self.metric.c_dist(self.root.centroid, streamline.features)
             dist_flip = self.metric.c_dist(self.root.centroid, streamline.features_flip)
 
@@ -267,7 +270,7 @@ cdef class HierarchicalQuickBundles(object):
         #print "***Dist", dist
         if dist <= self.root.threshold:
             # The streamline belong in this tree, let's add it.
-            print "Inserting into current root..."
+            #print "Inserting into current root..."
             hqb_insert(self.root, streamline, self.metric, self.min_threshold)
         else:
             # The streamline does not belong in this tree, we need to expand it.
@@ -305,7 +308,7 @@ cdef class HierarchicalQuickBundles(object):
             self.root = new_root
 
             # Insert the streamline in this new tree
-            print "Try reinserting..."
+            #print "Try reinserting..."
             self._insert(streamline)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
@@ -329,16 +332,16 @@ cdef class HierarchicalQuickBundles(object):
         pass
 
     def __str__(self):
+        #print "Printing tree..."
         return print_node(self.root)
 
 
-cdef print_node(CentroidNode* node, int indent=0):
+cdef print_node(CentroidNode* node, prepend=""):
     if node == NULL:
         return ""
 
     txt = "[" + ",".join(map(str, np.asarray(<int[:node.size]> node.indices))) + "]"
-    if node.nb_children > 0:
-        txt += " ({})".format(np.asarray(node.centroid))
+    txt += " ({})".format(np.asarray(node.centroid))
     txt += " children({})".format(node.nb_children)
     txt += " leaves({})".format(node.size)
     txt += " thres({})".format(node.threshold)
@@ -346,13 +349,11 @@ cdef print_node(CentroidNode* node, int indent=0):
 
     cdef int i
     for i in range(node.nb_children):
-        txt += " " * indent
         if i == node.nb_children-1:
-            txt += "`-- "  # Last child
+            # Last child
+            txt += "`-- " + print_node(node.children[i], prepend + "    ")
         else:
-            txt += "|-- "
-
-        txt += print_node(node.children[i], indent+4)
+            txt += "|-- " + print_node(node.children[i], prepend + "|   ")
 
     return txt
 
