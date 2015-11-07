@@ -192,6 +192,7 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
 
     if nearest_cluster.dist > node.threshold:
         # No near cluster, create a new one.
+        print "Adding child..."
         nearest_cluster.id = hqb_add_child(node, streamline)
 
     hqb_insert(node.children[nearest_cluster.id], streamline, metric, min_threshold)
