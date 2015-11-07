@@ -408,6 +408,17 @@ cdef class QuickBundlesX(object):
         cdef int n, d
         cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
         cdef int* flips = <int*> calloc(node.nb_children, sizeof(int))
+        # Check if some children centroids needs to be flipped according to the metric
+        # when comparing them with the one of the first child.
+        cdef double dist, dist_flip
+        cdef Data2D centroid = node.children[0].centroid
+        cdef Data2D centroid_flip = node.children[0].centroid[::-1]
+        flips[0] = 0
+        for i in range(1, node.nb_children):
+            dist = self.metric.c_dist(node.children[i].centroid, centroid)
+            dist_flip = self.metric.c_dist(node.children[i].centroid, centroid_flip)
+            flips[i] = dist_flip < dist
+
         for n in range(N):
             for d in range(D):
                 node.centroid[n, d] = 0
@@ -511,7 +522,7 @@ cdef print_node(CentroidNode* node, prepend=""):
     if node == NULL:
         return ""
 
-    txt = "{}".format(np.asarray(node.centroid))
+    txt = "{}".format(np.asarray(node.centroid).tolist())
     txt += " {" + ",".join(map(str, np.asarray(<int[:node.size]> node.indices))) + "}"
     txt += " children({})".format(node.nb_children)
     txt += " count({})".format(node.size)
