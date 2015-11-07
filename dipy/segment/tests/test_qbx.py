@@ -113,7 +113,8 @@ def test_3D_segments():
                         [5.5, 1, 0]]], dtype="f4")
 
     thresholds = [4, 2, 1]
-    qbx = QuickBundlesX(feature_shape, thresholds, AveragePointwiseEuclideanMetric())
+    qbx = QuickBundlesX(feature_shape, thresholds,
+                        AveragePointwiseEuclideanMetric())
     print(qbx)
 
     for i, p in enumerate(points):
@@ -131,7 +132,8 @@ def test_3D_points():
                        [[5.5, 0, 0]]], dtype="f4")
 
     thresholds = [4, 2, 1]
-    qbx = QuickBundlesX(feature_shape, thresholds, AveragePointwiseEuclideanMetric())
+    qbx = QuickBundlesX(feature_shape, thresholds,
+                        AveragePointwiseEuclideanMetric())
     print(qbx)
 
     for i, p in enumerate(points):
@@ -169,8 +171,8 @@ def test_with_simulated_bundles():
 
 def test_with_simulated_bundles2():
     # Generate synthetic streamlines
-    bundles = bearing_bundles()
-    bundles.append(straight_bundle(100))
+    bundles = bearing_bundles(4)
+    bundles.append(straight_bundle(1))
     streamlines = list(itertools.chain(*bundles))
 
     from dipy.viz import actor, window
