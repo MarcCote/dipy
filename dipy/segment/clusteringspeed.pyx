@@ -196,8 +196,6 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
     if node.nb_children == 0 or nearest_cluster.dist > node.children[k].threshold:
         # No near cluster, create a new one.
         nearest_cluster.id = hqb_add_child(node, streamline)
-        print nearest_cluster.id, node.nb_children
-        print node.children[nearest_cluster.id].nb_children
 
     hqb_insert(node.children[nearest_cluster.id], streamline, metric, min_threshold)
     hqb_update(node)
@@ -349,6 +347,7 @@ cdef print_node(CentroidNode* node, prepend=""):
 
     cdef int i
     for i in range(node.nb_children):
+        txt += prepend
         if i == node.nb_children-1:
             # Last child
             txt += "`-- " + print_node(node.children[i], prepend + "    ")
