@@ -54,21 +54,21 @@ cdef void aabb_creation(Data2D streamline, float* aabb) nogil:
         aabb[d] = min_[d] + aabb[d + 3]  # center
 
 
-cdef inline int aabb_overlap(float* aabb1, float* aabb2) nogil:
+cdef inline int aabb_overlap(float* aabb1, float* aabb2, float padding=0.) nogil:
     """ SIMD optimized AABB-AABB test
 
     Optimized by removing conditional branches
     """
     cdef:
-        int x = fabs(aabb1[0] - aabb2[0]) <= (aabb1[3] + aabb2[3])
-        int y = fabs(aabb1[1] - aabb2[1]) <= (aabb1[4] + aabb2[4])
-        int z = fabs(aabb1[2] - aabb2[2]) <= (aabb1[5] + aabb2[5])
+        int x = fabs(aabb1[0] - aabb2[0]) <= (aabb1[3] + aabb2[3] + 2*padding)
+        int y = fabs(aabb1[1] - aabb2[1]) <= (aabb1[4] + aabb2[4] + 2*padding)
+        int z = fabs(aabb1[2] - aabb2[2]) <= (aabb1[5] + aabb2[5] + 2*padding)
 
     return x & y & z;
 
 
 cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold):
-    print "Creating empty node... ",
+    #print "Creating empty node... ",
     # Important: because the CentroidNode structure contains an uninitialized memview,
     # we need to zero-initialize the allocated memory (calloc or via memset),
     # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
@@ -87,7 +87,7 @@ cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold):
     node.indices = NULL
     node.size = 0
     node.centroid_shape = centroid_shape
-    print "Done."
+    #print "Done."
     return node
 
 
@@ -165,7 +165,7 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
         cnp.npy_intp k
         NearestCluster nearest_cluster
 
-    if node.threshold < min_threshold:
+    if node.threshold <= min_threshold:
         hqb_add_to_node(node, streamline, False)
         return
 
@@ -175,7 +175,7 @@ cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, 
 
     for k in range(node.nb_children):
         # Check streamline's aabb colides with the current child.
-        if aabb_overlap(node.children[k].aabb, streamline.aabb):
+        if aabb_overlap(node.children[k].aabb, streamline.aabb, node.threshold/2.):
             dist = metric.c_dist(node.children[k].centroid, streamline.features)
 
             # Keep track of the nearest cluster
@@ -254,7 +254,8 @@ cdef class HierarchicalQuickBundles(object):
         cdef CentroidNode* new_root
         cdef double dist = BIGGEST_DOUBLE
         cdef double dist_flip
-        if aabb_overlap(self.root.aabb, streamline.aabb):
+
+        if aabb_overlap(self.root.aabb, streamline.aabb, self.root.threshold/2.):
             dist = self.metric.c_dist(self.root.centroid, streamline.features)
             dist_flip = self.metric.c_dist(self.root.centroid, streamline.features_flip)
 
@@ -265,12 +266,12 @@ cdef class HierarchicalQuickBundles(object):
         #print "***Dist", dist
         if dist <= self.root.threshold:
             # The streamline belong in this tree, let's add it.
-            #print "Inserting into current root..."
+            print "Inserting into current root..."
             hqb_insert(self.root, streamline, self.metric, self.min_threshold)
         else:
             # The streamline does not belong in this tree, we need to expand it.
             # Build a new root.
-            #print "Building new root..."
+            print "Building new root with thres: {}...".format(self.root.threshold*THRESHOLD_MULTIPLIER)
             new_root = create_empty_node(self.root.centroid_shape,
                                          self.root.threshold*THRESHOLD_MULTIPLIER)
 
@@ -289,10 +290,6 @@ cdef class HierarchicalQuickBundles(object):
 
             # Create AABB with padding
             aabb_creation(new_root.centroid, new_root.aabb)
-            # Pad the bounding box according to the new_root.threshold
-            new_root.aabb[3] += new_root.threshold / 2.
-            new_root.aabb[4] += new_root.threshold / 2.
-            new_root.aabb[5] += new_root.threshold / 2.
 
             # Add self.root as a child of new_root
             #print "Adding child..."
@@ -307,7 +304,7 @@ cdef class HierarchicalQuickBundles(object):
             self.root = new_root
 
             # Insert the streamline in this new tree
-            #print "Try reinserting..."
+            print "Try reinserting..."
             self._insert(streamline)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
@@ -323,10 +320,6 @@ cdef class HierarchicalQuickBundles(object):
         streamline.idx = datum_idx
 
         aabb_creation(streamline.features, streamline.aabb)
-        # Pad the bounding box according to the min_threshold
-        streamline.aabb[3] += self.min_threshold / 2.
-        streamline.aabb[4] += self.min_threshold / 2.
-        streamline.aabb[5] += self.min_threshold / 2.
 
         self._insert(streamline)
         free(streamline)
