@@ -8,7 +8,8 @@ from dipy.data import get_data
 import nibabel.trackvis as tv
 
 
-def generate_straight_bundle(nb_streamlines=1, nb_pts=30, step_size=1, radius=1, rng=np.random.RandomState(42)):
+def straight_bundle(nb_streamlines=1, nb_pts=30, step_size=1,
+                    radius=1, rng=np.random.RandomState(42)):
     bundle = []
 
     bundle_length = step_size * nb_pts
@@ -27,21 +28,22 @@ def generate_straight_bundle(nb_streamlines=1, nb_pts=30, step_size=1, radius=1,
     return bundle
 
 
-def generate_bearing_bundles(nb_balls=6, bearing_radius=2):
+def bearing_bundles(nb_balls=6, bearing_radius=2):
     bundles = []
 
     for theta in np.linspace(0, 2*np.pi, nb_balls, endpoint=False):
         x = bearing_radius * np.cos(theta)
         y = bearing_radius * np.sin(theta)
 
-        bundle = np.array(generate_straight_bundle(nb_streamlines=100))
+        bundle = np.array(straight_bundle(nb_streamlines=100))
         bundle += (x, y, 0)
         bundles.append(bundle)
 
     return bundles
 
 
-def gen_streamlines_in_circle(nb_streamlines=1, nb_pts=30, step_size=1, radius=1):
+def streamlines_in_circle(nb_streamlines=1, nb_pts=30, step_size=1,
+                          radius=1):
     bundle = []
 
     bundle_length = step_size * nb_pts
@@ -58,7 +60,8 @@ def gen_streamlines_in_circle(nb_streamlines=1, nb_pts=30, step_size=1, radius=1
     return bundle
 
 
-def gen_streamlines_parallel(nb_streamlines=1, nb_pts=30, step_size=1, delta=1):
+def streamlines_parallel(nb_streamlines=1, nb_pts=30, step_size=1,
+                         delta=1):
     bundle = []
 
     bundle_length = step_size * nb_pts
@@ -139,7 +142,7 @@ def test_3D_points():
 
 def test_with_simulated_bundles():
 
-    streamlines = simulated_bundle(100, False, 20)
+    streamlines = simulated_bundle(3, False, 2)
 
     from dipy.viz import actor, window
 
@@ -149,11 +152,25 @@ def test_with_simulated_bundles():
 
     window.show(renderer)
 
+    thresholds = [10, 3, 1]
+
+    qbx = QuickBundlesX(streamlines[0].shape,
+                        thresholds, AveragePointwiseEuclideanMetric())
+    print(qbx)
+
+    for i, s in enumerate(streamlines):
+        print "\nInserting streamline {}".format(i)
+        qbx.insert(s.astype('f4'), np.int32(i))
+        print(qbx)
+
+    from ipdb import set_trace
+    set_trace()
+
 
 def test_with_simulated_bundles2():
     # Generate synthetic streamlines
-    bundles = generate_bearing_bundles()
-    bundles.append(generate_straight_bundle(100))
+    bundles = bearing_bundles()
+    bundles.append(straight_bundle(100))
     streamlines = list(itertools.chain(*bundles))
 
     from dipy.viz import actor, window
@@ -166,4 +183,4 @@ def test_with_simulated_bundles2():
 
 
 if __name__ == '__main__':
-    test_with_simulated_bundles2()
+    test_with_simulated_bundles()
