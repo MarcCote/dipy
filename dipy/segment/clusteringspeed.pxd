@@ -2,6 +2,13 @@ from cythonutils cimport Data2D, Shape, shape2tuple, tuple2shape
 from metricspeed cimport Metric
 
 
+cdef struct Streamline:
+    Data2D features
+    Data2D features_flip
+    float[6] aabb
+    int idx
+
+
 cdef struct Centroid:
     Data2D features
     int size
@@ -10,6 +17,22 @@ cdef struct Centroid:
 cdef struct NearestCluster:
     int id
     double dist
+    int flip
+
+cdef struct Test:
+    Data2D centroid
+
+cdef struct CentroidNode:
+    CentroidNode* father
+    CentroidNode** children
+    int nb_children
+    Data2D centroid
+    float[6] aabb
+    float threshold
+    int* indices
+    int size
+    Shape centroid_shape
+
 
 
 cdef class Clusters:
