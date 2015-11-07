@@ -24,9 +24,15 @@ DEF BIGGEST_INT = 2147483647  # np.iinfo('i4').max
 DEF BIGGEST_FLOAT = 3.4028235e+38  # np.finfo('f4').max
 DEF SMALLEST_FLOAT = -3.4028235e+38  # np.finfo('f4').max
 
+THRESHOLD_MULTIPLIER = 2.
 
 cdef void aabb_creation(Data2D streamline, float* aabb) nogil:
-    """ Creates AABB enveloping the given streamline. """
+    """ Creates AABB enveloping the given streamline.
+
+        Notes
+        -----
+        This currently assumes streamline is made of 3D points.
+    """
     cdef:
         int N = streamline.shape[0], D = streamline.shape[1]
         int n, d
@@ -107,7 +113,7 @@ cdef hqb_add_to_node(CentroidNode* node, Streamline* streamline, int flip):
 cdef int hqb_add_child(CentroidNode* node, Streamline* streamline):
     print "Adding child..."
     # Create new child.
-    cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/2.)
+    cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/THRESHOLD_MULTIPLIER)
     #hqb_add_to_node(child, streamline, False)
 
     # Add new child.
@@ -120,9 +126,9 @@ cdef int hqb_add_child(CentroidNode* node, Streamline* streamline):
 
 
 cdef void hqb_update(CentroidNode* node):
-    # Update aabb and centroid
-    # Update indices ?
     cdef int i, j
+
+    # Update indices
     node.size = 0
     for i in range(node.nb_children):
         node.size += node.children[i].size
@@ -134,6 +140,23 @@ cdef void hqb_update(CentroidNode* node):
         for j in range(node.children[i].size):
             node.indices[cpt] = node.children[i].indices[j]
             cpt += 1
+
+    # Update centroid
+    cdef int n, d
+    cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
+    for n in range(N):
+        for d in range(D):
+            node.centroid[n, d] = 0
+            for i in range(node.nb_children):
+                node.centroid[n, d] += node.children[i].centroid[n, d]
+
+            node.centroid[n, d] /= node.nb_children
+
+    # Update AABB
+    aabb_creation(node.centroid, node.aabb)
+    node.aabb[3] += node.threshold / 2.
+    node.aabb[4] += node.threshold / 2.
+    node.aabb[5] += node.threshold / 2.
 
 
 cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, float min_threshold):
@@ -187,66 +210,144 @@ cdef class HierarchicalQuickBundles(object):
         self.features_shape = tuple2shape(features_shape)
         self.metric = metric
         self.min_threshold = min_threshold
-        self.root = create_empty_node(self.features_shape, self.min_threshold)
+        self.root = NULL
 
         self.features = np.empty(features_shape, dtype=DTYPE)
         self.features_flip = np.empty(features_shape, dtype=DTYPE)
 
     def __dealloc__(self):
         # Free indices, father and children
-        free(self.root)
+        # TODO: free children
+        print "Deallocating..."
+        if self.root != NULL:
+            print "Freeing root..."
+            free(self.root)
+            self.root = NULL
 
-    cdef void _insert(self, CentroidNode* root, Streamline* streamline):
-        hqb_insert(root, streamline, self.metric, self.min_threshold)
+    cdef void _insert(self, Streamline* streamline):
 
-        # If root has multiple children, create a new one with an higher threshold.
-        #TODO
+        # Check if we have a root.
+        if self.root == NULL:
+            print "Building root...",
+            self.root = create_empty_node(self.features_shape, self.min_threshold)
+
+            # Add the streamline to the root.
+            # Build indices
+            self.root.size = 1
+            self.root.indices = <int*> malloc(self.root.size*sizeof(int))
+            self.root.indices[0] = streamline.idx
+
+            # Build AABB
+            for i in range(6):
+                self.root.aabb[i] = streamline.aabb[i]
+
+            # Build centroid
+            for n in range(self.root.centroid.shape[0]):
+                for d in range(self.root.centroid.shape[1]):
+                    self.root.centroid[n, d] = streamline.features[n, d]
+
+            print "Done"
+            return
+
+
+        # Check if the streamline belongs to the tree currently spawn by self.root.
+        cdef CentroidNode* new_root
+        cdef double dist = BIGGEST_DOUBLE
+        cdef double dist_flip
+        if aabb_overlap(self.root.aabb, streamline.aabb):
+            dist = self.metric.c_dist(self.root.centroid, streamline.features)
+            dist_flip = self.metric.c_dist(self.root.centroid, streamline.features_flip)
+
+            if dist_flip < dist:
+                dist = dist_flip
+
+        #print "***AABB overlap", aabb_overlap(self.root.aabb, streamline.aabb)
+        #print "***Dist", dist
+        if dist <= self.root.threshold:
+            # The streamline belong in this tree, let's add it.
+            #print "Inserting into current root..."
+            hqb_insert(self.root, streamline, self.metric, self.min_threshold)
+        else:
+            # The streamline does not belong in this tree, we need to expand it.
+            # Build a new root.
+            #print "Building new root..."
+            new_root = create_empty_node(self.root.centroid_shape,
+                                         self.root.threshold*THRESHOLD_MULTIPLIER)
+
+            # Copy indices
+            #print "Copying indices..."
+            new_root.size = self.root.size
+            new_root.indices = <int*> malloc(new_root.size*sizeof(int))
+            for i in range(self.root.size):
+                new_root.indices[i] = self.root.indices[i]
+
+            # Copy centroid
+            #print "Copying centroid..."
+            for n in range(self.root.centroid.shape[0]):
+                for d in range(self.root.centroid.shape[1]):
+                    new_root.centroid[n, d] = self.root.centroid[n, d]
+
+            # Create AABB with padding
+            aabb_creation(new_root.centroid, new_root.aabb)
+            # Pad the bounding box according to the new_root.threshold
+            new_root.aabb[3] += new_root.threshold / 2.
+            new_root.aabb[4] += new_root.threshold / 2.
+            new_root.aabb[5] += new_root.threshold / 2.
+
+            # Add self.root as a child of new_root
+            #print "Adding child..."
+            new_root.children = <CentroidNode**> malloc((new_root.nb_children+1)*sizeof(CentroidNode*))
+            new_root.children[0] = self.root
+            new_root.nb_children += 1
+
+            # Set old root's father.
+            self.root.father = new_root
+
+            # Change actual root.
+            self.root = new_root
+
+            # Insert the streamline in this new tree
+            #print "Try reinserting..."
+            self._insert(streamline)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
-        #print "Extracting features..."
         self.metric.feature.c_extract(datum, self.features)
         self.metric.feature.c_extract(datum[::-1], self.features_flip)
-        #print "Extracted features"
 
         # Important: because the CentroidNode structure contains an uninitialized memview,
         # we need to zero-initialize the allocated memory (calloc or via memset),
         # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
-        #print "Creating streamline..."
         cdef Streamline* streamline = <Streamline*> calloc(1, sizeof(Streamline))
         streamline.features = self.features
         streamline.features_flip = self.features_flip
         streamline.idx = datum_idx
-        #print "Created streamline"
 
-        #print "Computing AABB..."
         aabb_creation(streamline.features, streamline.aabb)
-        #print "Computing AABB..."
+        # Pad the bounding box according to the min_threshold
+        streamline.aabb[3] += self.min_threshold / 2.
+        streamline.aabb[4] += self.min_threshold / 2.
+        streamline.aabb[5] += self.min_threshold / 2.
 
-        #print "Inserting..."
-        self._insert(self.root, streamline)
-        #print "Inserted"
-
-        #print "Freeing streamline..."
+        self._insert(streamline)
         free(streamline)
-        #print "Freed streamline..."
 
     cdef void _expand(self, CentroidNode* node):
         pass
-
-    def debug(self):
-        debug(self.root)
 
     def __str__(self):
         return print_node(self.root)
 
 
 cdef print_node(CentroidNode* node, int indent=0):
-    if node.indices == NULL:
+    if node == NULL:
         return ""
 
     txt = "[" + ",".join(map(str, np.asarray(<int[:node.size]> node.indices))) + "]"
+    if node.nb_children > 0:
+        txt += " ({})".format(np.asarray(node.centroid))
     txt += " children({})".format(node.nb_children)
     txt += " leaves({})".format(node.size)
+    txt += " thres({})".format(node.threshold)
     txt += "\n"
 
     cdef int i
