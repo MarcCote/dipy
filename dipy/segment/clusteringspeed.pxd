@@ -32,6 +32,7 @@ cdef struct CentroidNode:
     int* indices
     int size
     Shape centroid_shape
+    int level
 
 
 
