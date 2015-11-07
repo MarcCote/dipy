@@ -165,13 +165,22 @@ def test_with_simulated_bundles():
         qbx.insert(s.astype('f4'), np.int32(i))
         print(qbx)
 
+    renderer.clear()
+
+    for level in range(len(thresholds) + 1):
+        clusters = qbx.get_clusters(level)
+        clusters_actor = actor.line(clusters.centroids)
+        renderer.add(clusters_actor)
+        window.show(renderer)
+        renderer.clear()
+
     from ipdb import set_trace
     set_trace()
 
 
 def test_with_simulated_bundles2():
     # Generate synthetic streamlines
-    bundles = bearing_bundles(4)
+    bundles = bearing_bundles(4, 2)
     bundles.append(straight_bundle(1))
     streamlines = list(itertools.chain(*bundles))
 
@@ -183,6 +192,30 @@ def test_with_simulated_bundles2():
 
     window.show(renderer)
 
+    thresholds = [10, 2, 1]
+
+    qbx = QuickBundlesX(streamlines[0].shape,
+                        thresholds, AveragePointwiseEuclideanMetric())
+
+    print(qbx)
+
+    for i, s in enumerate(streamlines):
+        print "\nInserting streamline {}".format(i)
+        qbx.insert(s.astype('f4'), np.int32(i))
+        # print(qbx)
+
+    renderer.clear()
+
+    for level in range(len(thresholds) + 1):
+        clusters = qbx.get_clusters(level)
+        clusters_actor = actor.line(clusters.centroids)
+        renderer.add(clusters_actor)
+        window.show(renderer)
+        renderer.clear()
+
+    from ipdb import set_trace
+    set_trace()
+
 
 if __name__ == '__main__':
-    test_with_simulated_bundles()
+    test_with_simulated_bundles2()
