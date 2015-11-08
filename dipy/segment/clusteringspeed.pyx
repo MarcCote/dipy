@@ -28,6 +28,29 @@ DEF SMALLEST_FLOAT = -3.4028235e+38  # np.finfo('f4').max
 
 THRESHOLD_MULTIPLIER = 2.
 
+cdef print_node(CentroidNode* node, prepend=""):
+    if node == NULL:
+        return ""
+
+    txt = "{}".format(np.asarray(node.centroid).tolist())
+    txt += " {" + ",".join(map(str, np.asarray(<int[:node.size]> node.indices))) + "}"
+    txt += " children({})".format(node.nb_children)
+    txt += " count({})".format(node.size)
+    txt += " thres({})".format(node.threshold)
+    txt += "\n"
+
+    cdef int i
+    for i in range(node.nb_children):
+        txt += prepend
+        if i == node.nb_children-1:
+            # Last child
+            txt += "`-- " + print_node(node.children[i], prepend + "    ")
+        else:
+            txt += "|-- " + print_node(node.children[i], prepend + "|   ")
+
+    return txt
+
+
 cdef void aabb_creation(Data2D streamline, float* aabb) nogil:
     """ Creates AABB enveloping the given streamline.
 
@@ -69,13 +92,14 @@ cdef inline int aabb_overlap(float* aabb1, float* aabb2, float padding=0.) nogil
     return x & y & z;
 
 
-cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold):
-    #print "Creating empty node... ",
+cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold) nogil:
     # Important: because the CentroidNode structure contains an uninitialized memview,
     # we need to zero-initialize the allocated memory (calloc or via memset),
     # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
     cdef CentroidNode* node = <CentroidNode*> calloc(1, sizeof(CentroidNode))
-    node.centroid = <float[:centroid_shape.dims[0], :centroid_shape.dims[1]]> calloc(centroid_shape.size, sizeof(float))
+    with gil:
+        node.centroid = <float[:centroid_shape.dims[0], :centroid_shape.dims[1]]> calloc(centroid_shape.size, sizeof(float))
+
     node.father = NULL
     node.children = NULL
     node.nb_children = 0
@@ -89,115 +113,7 @@ cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold):
     node.indices = NULL
     node.size = 0
     node.centroid_shape = centroid_shape
-    #print "Done."
     return node
-
-
-cdef hqb_add_to_node(CentroidNode* node, Streamline* streamline, int flip):
-
-    cdef Data2D element = streamline.features
-    cdef int C = node.size
-    cdef cnp.npy_intp n, d
-
-    if flip:
-        element = streamline.features_flip
-
-    cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
-    for n in range(N):
-        for d in range(D):
-            node.centroid[n, d] = ((node.centroid[n, d] * C) + element[n, d]) / (C+1)
-
-    node.indices = <int*> realloc(node.indices, (C+1)*sizeof(int))
-    node.indices[C] = streamline.idx
-    node.size += 1
-
-
-cdef int hqb_add_child(CentroidNode* node, Streamline* streamline):
-    #print "Adding child..."
-    # Create new child.
-    cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/THRESHOLD_MULTIPLIER)
-    #hqb_add_to_node(child, streamline, False)
-
-    # Add new child.
-    child.father = node
-    node.children = <CentroidNode**> realloc(node.children, (node.nb_children+1)*sizeof(CentroidNode*))
-    node.children[node.nb_children] = child
-    node.nb_children += 1
-    #print "Added child..."
-    return node.nb_children-1
-
-
-cdef void hqb_update(CentroidNode* node):
-    cdef int i, j
-
-    # Update indices
-    node.size = 0
-    for i in range(node.nb_children):
-        node.size += node.children[i].size
-
-    node.indices = <int*> realloc(node.indices, node.size*sizeof(int))
-
-    cdef int cpt = 0
-    for i in range(node.nb_children):
-        for j in range(node.children[i].size):
-            node.indices[cpt] = node.children[i].indices[j]
-            cpt += 1
-
-    # Update centroid
-    cdef int n, d
-    cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
-    for n in range(N):
-        for d in range(D):
-            node.centroid[n, d] = 0
-            for i in range(node.nb_children):
-                node.centroid[n, d] += node.children[i].centroid[n, d]
-
-            node.centroid[n, d] /= node.nb_children
-
-    # Update AABB
-    aabb_creation(node.centroid, node.aabb)
-
-
-cdef void hqb_insert(CentroidNode* node, Streamline* streamline, Metric metric, float min_threshold):
-    cdef:
-        float dist, dist_flip
-        cnp.npy_intp k
-        NearestCluster nearest_cluster
-
-    #print "Inserting..."
-    if node.threshold <= min_threshold:
-        #print "Hit the bottom!"
-        hqb_add_to_node(node, streamline, False)
-        return
-
-    nearest_cluster.id = -1
-    nearest_cluster.dist = BIGGEST_DOUBLE
-    nearest_cluster.flip = 0
-
-    #print "Comparing with centroids..."
-    for k in range(node.nb_children):
-        # Check streamline's aabb colides with the current child.
-        if aabb_overlap(node.children[k].aabb, streamline.aabb, node.children[k].threshold):
-            dist = metric.c_dist(node.children[k].centroid, streamline.features)
-
-            # Keep track of the nearest cluster
-            if dist < nearest_cluster.dist:
-                nearest_cluster.dist = dist
-                nearest_cluster.id = k
-                nearest_cluster.flip = 0
-
-            dist_flip = metric.c_dist(node.children[k].centroid, streamline.features_flip)
-            if dist_flip < nearest_cluster.dist:
-                nearest_cluster.dist = dist_flip
-                nearest_cluster.id = k
-                nearest_cluster.flip = 1
-
-    if node.nb_children == 0 or nearest_cluster.dist > node.children[k].threshold:
-        # No near cluster, create a new one.
-        nearest_cluster.id = hqb_add_child(node, streamline)
-
-    hqb_insert(node.children[nearest_cluster.id], streamline, metric, min_threshold)
-    hqb_update(node)
 
 
 cdef class HierarchicalQuickBundles(object):
@@ -225,6 +141,109 @@ cdef class HierarchicalQuickBundles(object):
             print "Freeing root..."
             free(self.root)
             self.root = NULL
+
+    cdef hqb_add_to_node(self, CentroidNode* node, Streamline* streamline, int flip):
+
+        cdef Data2D element = streamline.features
+        cdef int C = node.size
+        cdef cnp.npy_intp n, d
+
+        if flip:
+            element = streamline.features_flip
+
+        cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
+        for n in range(N):
+            for d in range(D):
+                node.centroid[n, d] = ((node.centroid[n, d] * C) + element[n, d]) / (C+1)
+
+        node.indices = <int*> realloc(node.indices, (C+1)*sizeof(int))
+        node.indices[C] = streamline.idx
+        node.size += 1
+
+    cdef int hqb_add_child(self, CentroidNode* node, Streamline* streamline):
+        #print "Adding child..."
+        # Create new child.
+        cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/THRESHOLD_MULTIPLIER)
+        #hqb_add_to_node(child, streamline, False)
+
+        # Add new child.
+        child.father = node
+        node.children = <CentroidNode**> realloc(node.children, (node.nb_children+1)*sizeof(CentroidNode*))
+        node.children[node.nb_children] = child
+        node.nb_children += 1
+        #print "Added child..."
+        return node.nb_children-1
+
+    cdef void hqb_update(self, CentroidNode* node):
+        cdef int i, j
+
+        # Update indices
+        node.size = 0
+        for i in range(node.nb_children):
+            node.size += node.children[i].size
+
+        node.indices = <int*> realloc(node.indices, node.size*sizeof(int))
+
+        cdef int cpt = 0
+        for i in range(node.nb_children):
+            for j in range(node.children[i].size):
+                node.indices[cpt] = node.children[i].indices[j]
+                cpt += 1
+
+        # Update centroid
+        cdef int n, d
+        cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
+        for n in range(N):
+            for d in range(D):
+                node.centroid[n, d] = 0
+                for i in range(node.nb_children):
+                    node.centroid[n, d] += node.children[i].centroid[n, d]
+
+                node.centroid[n, d] /= node.nb_children
+
+        # Update AABB
+        aabb_creation(node.centroid, node.aabb)
+
+    cdef void hqb_insert(self, CentroidNode* node, Streamline* streamline):
+        cdef:
+            float dist, dist_flip
+            cnp.npy_intp k
+            NearestCluster nearest_cluster
+
+        #print "Inserting..."
+        if node.threshold <= self.min_threshold:
+            #print "Hit the bottom!"
+            self.hqb_add_to_node(node, streamline, False)
+            return
+
+        nearest_cluster.id = -1
+        nearest_cluster.dist = BIGGEST_DOUBLE
+        nearest_cluster.flip = 0
+
+        #print "Comparing with centroids..."
+        for k in range(node.nb_children):
+            # Check streamline's aabb colides with the current child.
+            if aabb_overlap(node.children[k].aabb, streamline.aabb, node.children[k].threshold):
+                dist = self.metric.c_dist(node.children[k].centroid, streamline.features)
+
+                # Keep track of the nearest cluster
+                if dist < nearest_cluster.dist:
+                    nearest_cluster.dist = dist
+                    nearest_cluster.id = k
+                    nearest_cluster.flip = 0
+
+                dist_flip = self.metric.c_dist(node.children[k].centroid, streamline.features_flip)
+                if dist_flip < nearest_cluster.dist:
+                    nearest_cluster.dist = dist_flip
+                    nearest_cluster.id = k
+                    nearest_cluster.flip = 1
+
+        if node.nb_children == 0 or nearest_cluster.dist > node.children[k].threshold:
+            # No near cluster, create a new one.
+            nearest_cluster.id = self.hqb_add_child(node, streamline)
+
+        self.hqb_insert(node.children[nearest_cluster.id], streamline)
+        self.hqb_update(node)
 
     cdef void _insert(self, Streamline* streamline):
 
@@ -268,7 +287,7 @@ cdef class HierarchicalQuickBundles(object):
         if dist <= self.root.threshold:
             # The streamline belong in this tree, let's add it.
             #print "Inserting into current root..."
-            hqb_insert(self.root, streamline, self.metric, self.min_threshold)
+            self.hqb_insert(self.root, streamline)
         else:
             # The streamline does not belong in this tree, we need to expand it.
             # Build a new root.
@@ -363,18 +382,15 @@ cdef class QuickBundlesX(object):
         self.clusters = None
 
     def __dealloc__(self):
-        # Free indices, father and children
-        # TODO: free children
         print "Deallocating QuickBundlesX object..."
-        if self.root != NULL:
-            free(self.root)
-            self.root = NULL
+        self.traverse_postorder(self.root, self._dealloc_node)
+        self.root = NULL
 
         if self.thresholds != NULL:
             free(self.thresholds)
             self.thresholds = NULL
 
-    cdef int _add_child_to(self, CentroidNode* node):
+    cdef int _add_child_to(self, CentroidNode* node) nogil:
         # Create new child.
         cdef double threshold = 0.0
         if node.level+1 < self.nb_levels:
@@ -395,7 +411,7 @@ cdef class QuickBundlesX(object):
 
         return node.nb_children-1
 
-    cdef void _update(self, CentroidNode* node):
+    cdef void _update(self, CentroidNode* node) nogil:
         cdef int i, j
 
         # Update indices
@@ -440,7 +456,7 @@ cdef class QuickBundlesX(object):
         # Update AABB
         aabb_creation(node.centroid, node.aabb)
 
-    cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip):
+    cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip) nogil:
         cdef Data2D element = streamline.features
         cdef int C = node.size
         cdef cnp.npy_intp n, d
@@ -457,7 +473,7 @@ cdef class QuickBundlesX(object):
         node.indices[C] = streamline.idx
         node.size += 1
 
-    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip=0):
+    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip=0) nogil:
         cdef:
             float dist, dist_flip
             cnp.npy_intp k
@@ -495,7 +511,7 @@ cdef class QuickBundlesX(object):
         self._insert_in(node.children[nearest_cluster.id], streamline, nearest_cluster.flip)
         self._update(node)
 
-    cdef void _insert(self, Streamline* streamline):
+    cdef void _insert(self, Streamline* streamline) nogil:
         # Create root if needed.
         if self.root == NULL:
             self.root = create_empty_node(self.features_shape, self.thresholds[0])
@@ -518,9 +534,6 @@ cdef class QuickBundlesX(object):
         self._insert(streamline)
         free(streamline)
 
-    cdef void _expand(self, CentroidNode* node):
-        pass
-
     def __str__(self):
         #print "Printing tree..."
         return print_node(self.root)
@@ -531,6 +544,20 @@ cdef class QuickBundlesX(object):
             self.traverse_postorder(node.children[i], visit)
 
         visit(self, node)
+
+    cdef void _dealloc_node(self, CentroidNode* node):
+        free(&(node.centroid[0, 0]))
+        node.centroid = None  # Necessary to decrease refcount
+
+        if node.children != NULL:
+            free(node.children)
+            node.children = NULL
+
+        free(node.indices)
+        node.indices = NULL
+
+        # No need to free node.father, only the current node.
+        free(node)
 
     cdef void _fetch_level(self, CentroidNode* node):
         if node.level == self.level:
@@ -559,38 +586,6 @@ cdef class QuickBundlesX(object):
     #                node = None
     #        else:
     #            node = parent_stack.pop()
-
-
-
-cdef print_node(CentroidNode* node, prepend=""):
-    if node == NULL:
-        return ""
-
-    txt = "{}".format(np.asarray(node.centroid).tolist())
-    txt += " {" + ",".join(map(str, np.asarray(<int[:node.size]> node.indices))) + "}"
-    txt += " children({})".format(node.nb_children)
-    txt += " count({})".format(node.size)
-    txt += " thres({})".format(node.threshold)
-    txt += "\n"
-
-    cdef int i
-    for i in range(node.nb_children):
-        txt += prepend
-        if i == node.nb_children-1:
-            # Last child
-            txt += "`-- " + print_node(node.children[i], prepend + "    ")
-        else:
-            txt += "|-- " + print_node(node.children[i], prepend + "|   ")
-
-    return txt
-
-
-
-cdef void debug(CentroidNode* node):
-    print "Nb. children: {}".format(node.nb_children)
-    print "Size: {}".format(node.size)
-    print "Indices {}".format(np.asarray(<int[:node.size]> node.indices))
-    print "Centroid {}".format(np.asarray(node.centroid))
 
 
 cdef class Clusters:
