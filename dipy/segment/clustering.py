@@ -508,3 +508,62 @@ class QuickBundles(Clustering):
 
         cluster_map.refdata = streamlines
         return cluster_map
+
+
+class QuickBundlesX(Clustering):
+    r""" Clusters streamlines using QuickBundlesX.
+
+    TODO
+
+    Parameters
+    ----------
+    thresholds : list of float
+        Thresholds to use for each clustering layer. A threshold represents the
+        maximum distance from a cluster for a streamline to be still considered
+        as part of it.
+    metric : str or `Metric` object (optional)
+        The distance metric to use when comparing two streamlines. By default,
+        the Minimum average Direct-Flip (MDF) distance [Garyfallidis12]_ is
+        used and streamlines are automatically resampled so they have 12 points.
+
+    References
+    ----------
+    .. [Garyfallidis12] Garyfallidis E. et al., QuickBundles a method for
+                        tractography simplification, Frontiers in Neuroscience,
+                        vol 6, no 175, 2012.
+    """
+    def __init__(self, thresholds, metric="MDF_12points"):
+        self.thresholds = thresholds
+
+        if isinstance(metric, Metric):
+            self.metric = metric
+        elif metric == "MDF_12points":
+            feature = ResampleFeature(nb_points=12)
+            self.metric = AveragePointwiseEuclideanMetric(feature)
+        else:
+            raise ValueError("Unknown metric: {0}".format(metric))
+
+    def cluster(self, streamlines, ordering=None):
+        """ Clusters `streamlines` into bundles.
+
+        Performs quickbundles algorithm using predefined metric and threshold.
+
+        Parameters
+        ----------
+        streamlines : list of 2D arrays
+            Each 2D array represents a sequence of 3D points (points, 3).
+        ordering : iterable of indices
+            Specifies the order in which data points will be clustered.
+
+        Returns
+        -------
+        `QuickBundlesX` object
+            Result of the clustering.
+        """
+        from dipy.segment.clustering_algorithms import quickbundlesX
+        qbx = quickbundlesX(streamlines, self.metric,
+                            thresholds=self.thresholds,
+                            ordering=ordering)
+
+        #cluster_map.refdata = streamlines
+        return qbx

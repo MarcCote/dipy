@@ -353,15 +353,6 @@ cdef class HierarchicalQuickBundles(object):
 
 
 cdef class QuickBundlesX(object):
-    cdef CentroidNode* root
-    cdef Metric metric
-    cdef Shape features_shape
-    cdef Data2D features
-    cdef Data2D features_flip
-    cdef double* thresholds
-    cdef int nb_levels
-    cdef object level
-    cdef object clusters
 
     def __init__(self, features_shape, levels_thresholds, Metric metric):
         self.features_shape = tuple2shape(features_shape)
@@ -473,7 +464,7 @@ cdef class QuickBundlesX(object):
         node.indices[C] = streamline.idx
         node.size += 1
 
-    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip=0) nogil:
+    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip) nogil:
         cdef:
             float dist, dist_flip
             cnp.npy_intp k
@@ -516,7 +507,7 @@ cdef class QuickBundlesX(object):
         if self.root == NULL:
             self.root = create_empty_node(self.features_shape, self.thresholds[0])
 
-        self._insert_in(self.root, streamline)
+        self._insert_in(self.root, streamline, 0)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
         self.metric.feature.c_extract(datum, self.features)
@@ -920,26 +911,6 @@ cdef class QuickBundles(object):
 
         """
         self.clusters.c_update(cluster_id)
-
-
-def test_hqb(streamlines, Metric metric, float min_threshold=1):
-    features_shape = shape2tuple(metric.feature.c_infer_shape(streamlines[0].astype(DTYPE)))
-    hqb = HierarchicalQuickBundles(features_shape, metric, min_threshold)
-    cdef Streamline streamline
-
-    for i, s in enumerate(streamlines):
-        hqb.insert(s, i)
-
-    cdef CentroidNode* c
-    print np.asarray(c.nb_children)
-    for i in range(hqb.root.nb_children):
-        c = hqb.root.children[i]
-        print "\nChild #{}".format(i)
-        print np.asarray(c.size)
-        print np.asarray(<int[:c.size]> c.indices)
-        print np.asarray(c.nb_children)
-        print np.asarray(c.centroid)
-
 
 def evaluate_aabbb_checks():
     cdef:

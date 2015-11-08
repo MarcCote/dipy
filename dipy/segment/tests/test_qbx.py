@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 
-from dipy.segment.clusteringspeed import QuickBundlesX
+from dipy.segment.clustering import QuickBundlesX
 from dipy.segment.metric import AveragePointwiseEuclideanMetric
 from dipy.tracking.streamline import set_number_of_points
 from dipy.data import get_data
@@ -100,7 +100,6 @@ def fornix_streamlines(no_pts=12):
 
 
 def test_3D_segments():
-    feature_shape = (2, 3)
     points = np.array([[[1, 0, 0],
                         [1, 1, 0]],
                        [[3, 1, 0],
@@ -113,18 +112,12 @@ def test_3D_segments():
                         [5.5, 1, 0]]], dtype="f4")
 
     thresholds = [4, 2, 1]
-    qbx = QuickBundlesX(feature_shape, thresholds,
-                        AveragePointwiseEuclideanMetric())
-    print(qbx)
-
-    for i, p in enumerate(points):
-        print "\nInserting {}".format(p)
-        qbx.insert(p, np.int32(i))
-        print(qbx)
+    qbx_class = QuickBundlesX(thresholds)
+    qbx = qbx_class.cluster(points)
+    print qbx
 
 
 def test_3D_points():
-    feature_shape = (1, 3)
     points = np.array([[[1, 0, 0]],
                        [[3, 0, 0]],
                        [[2, 0, 0]],
@@ -132,14 +125,9 @@ def test_3D_points():
                        [[5.5, 0, 0]]], dtype="f4")
 
     thresholds = [4, 2, 1]
-    qbx = QuickBundlesX(feature_shape, thresholds,
-                        AveragePointwiseEuclideanMetric())
-    print(qbx)
-
-    for i, p in enumerate(points):
-        print "\nInserting {}".format(p)
-        qbx.insert(p, np.int32(i))
-        print(qbx)
+    qbx_class = QuickBundlesX(thresholds)
+    qbx = qbx_class.cluster(points)
+    print qbx
 
 
 def test_with_simulated_bundles():
@@ -155,15 +143,9 @@ def test_with_simulated_bundles():
     window.show(renderer)
 
     thresholds = [10, 3, 1]
-
-    qbx = QuickBundlesX(streamlines[0].shape,
-                        thresholds, AveragePointwiseEuclideanMetric())
-    print(qbx)
-
-    for i, s in enumerate(streamlines):
-        print "\nInserting streamline {}".format(i)
-        qbx.insert(s.astype('f4'), np.int32(i))
-        print(qbx)
+    qbx_class = QuickBundlesX(thresholds)
+    qbx = qbx_class.cluster(streamlines)
+    print qbx
 
     renderer.clear()
 
@@ -193,16 +175,10 @@ def test_with_simulated_bundles2():
     window.show(renderer)
 
     thresholds = [10, 2, 1]
-
-    qbx = QuickBundlesX(streamlines[0].shape,
-                        thresholds, AveragePointwiseEuclideanMetric())
-
-    print(qbx)
-
-    for i, s in enumerate(streamlines):
-        print "\nInserting streamline {}".format(i)
-        qbx.insert(s.astype('f4'), np.int32(i))
-        # print(qbx)
+    qbx_class = QuickBundlesX(thresholds)
+    print "Adding streamlines..."
+    qbx = qbx_class.cluster(streamlines)
+    print qbx
 
     renderer.clear()
 
