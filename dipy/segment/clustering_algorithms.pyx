@@ -94,7 +94,9 @@ def quickbundles_compactlist(streamlines, Metric metric, double threshold, long 
             # of after all streamlines have been assigned like k-means algorithm.
             qb.update_step(cluster_id)
 
-    return clusters_centroid2clustermap_centroid(qb.clusters)
+    results = clusters_centroid2clustermap_centroid(qb.clusters)
+    results.stats = qb.get_stats()
+    return results
 
 
 def quickbundles(streamlines, Metric metric, double threshold,
