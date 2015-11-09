@@ -836,6 +836,7 @@ cdef class QuickBundles(object):
 
             for k in range(self.clusters.c_size()):
 
+                self.stats.nb_mdf_calls += 1
                 dist = self.metric.c_dist(self.clusters.centroids[k].features, features)
 
                 # Keep track of the nearest cluster
