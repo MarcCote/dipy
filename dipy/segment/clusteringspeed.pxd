@@ -2,6 +2,19 @@ from cythonutils cimport Data2D, Shape, shape2tuple, tuple2shape
 from metricspeed cimport Metric
 
 
+cdef struct QuickBundlesStats:
+    int nb_mdf_calls
+    int nb_aabb_calls
+
+
+cdef struct QuickBundlesXStatsLayer:
+    int nb_mdf_calls
+    int nb_aabb_calls
+
+cdef struct QuickBundlesXStats:
+    QuickBundlesXStatsLayer* stats_per_layer
+    int nb_mdf_calls_when_updating
+
 cdef struct Streamline:
     Data2D features
     Data2D features_flip
@@ -66,6 +79,7 @@ cdef class QuickBundles(object):
     cdef double aabb_pad
     cdef int max_nb_clusters
     cdef int bvh
+    cdef QuickBundlesStats stats
 
     cdef NearestCluster find_nearest_cluster(QuickBundles self, Data2D features) nogil except *
     cdef int assignment_step(QuickBundles self, Data2D datum, int datum_id) nogil except -1
@@ -82,6 +96,7 @@ cdef class QuickBundlesX(object):
     cdef int nb_levels
     cdef object level
     cdef object clusters
+    cdef QuickBundlesXStats stats
 
     cdef int _add_child_to(self, CentroidNode* node) nogil
     cdef void _update(self, CentroidNode* node) nogil

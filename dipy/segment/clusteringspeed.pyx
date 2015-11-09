@@ -372,6 +372,9 @@ cdef class QuickBundlesX(object):
         self.level = None
         self.clusters = None
 
+        self.stats.stats_per_layer = <QuickBundlesXStatsLayer*> calloc(self.nb_levels, sizeof(QuickBundlesXStatsLayer))
+        self.stats.nb_mdf_calls_when_updating = 0
+
     def __dealloc__(self):
         print "Deallocating QuickBundlesX object..."
         self.traverse_postorder(self.root, self._dealloc_node)
@@ -380,6 +383,10 @@ cdef class QuickBundlesX(object):
         if self.thresholds != NULL:
             free(self.thresholds)
             self.thresholds = NULL
+
+        if self.stats.stats_per_layer != NULL:
+            free(self.stats.stats_per_layer)
+            self.stats.stats_per_layer = NULL
 
     cdef int _add_child_to(self, CentroidNode* node) nogil:
         # Create new child.
@@ -395,10 +402,6 @@ cdef class QuickBundlesX(object):
         node.children = <CentroidNode**> realloc(node.children, (node.nb_children+1)*sizeof(CentroidNode*))
         node.children[node.nb_children] = child
         node.nb_children += 1
-
-        ## Add all necessary levels
-        #if child.level+1 < self.nb_levels:
-        #    self._add_child_to(child)
 
         return node.nb_children-1
 
@@ -429,6 +432,7 @@ cdef class QuickBundlesX(object):
         cdef Data2D centroid_flip = node.children[0].centroid[::-1]
         flips[0] = 0
         for i in range(1, node.nb_children):
+            self.stats.nb_mdf_calls_when_updating += 2
             dist = self.metric.c_dist(node.children[i].centroid, centroid)
             dist_flip = self.metric.c_dist(node.children[i].centroid, centroid_flip)
             flips[i] = dist_flip < dist
@@ -480,7 +484,9 @@ cdef class QuickBundlesX(object):
 
         for k in range(node.nb_children):
             # Check streamline's aabb colides with the current child.
+            self.stats.stats_per_layer[node.level].nb_aabb_calls += 1
             if aabb_overlap(node.children[k].aabb, streamline.aabb, node.threshold):
+                self.stats.stats_per_layer[node.level].nb_mdf_calls += 1
                 dist = self.metric.c_dist(node.children[k].centroid, streamline.features)
 
                 # Keep track of the nearest cluster
@@ -489,6 +495,7 @@ cdef class QuickBundlesX(object):
                     nearest_cluster.id = k
                     nearest_cluster.flip = 0
 
+                self.stats.stats_per_layer[node.level].nb_mdf_calls += 1
                 dist_flip = self.metric.c_dist(node.children[k].centroid, streamline.features_flip)
                 if dist_flip < nearest_cluster.dist:
                     nearest_cluster.dist = dist_flip
@@ -563,20 +570,16 @@ cdef class QuickBundlesX(object):
         self.traverse_postorder(self.root, self._fetch_level)
         return self.clusters
 
+    def get_stats(self):
+        stats_per_level = []
+        for i in range(self.nb_levels):
+            stats_per_level.append({'nb_mdf_calls': self.stats.stats_per_layer[i].nb_mdf_calls,
+                                    'nb_aabb_calls': self.stats.stats_per_layer[i].nb_aabb_calls})
 
-    #def get_clusters(self, int level):
-    #    parent_stack = []
+        stats = {'stats_per_level': stats_per_level,
+                 'nb_mdf_calls_when_updating': self.stats.nb_mdf_calls_when_updating}
 
-    #    while len(parent_stack) > 0 or node is not None:
-    #        if node is not None:
-    #            yield node
-    #            if len(node.children) > 0:
-    #                parent_stack += node.children[1:]
-    #                node = node.children[0]
-    #            else:
-    #                node = None
-    #        else:
-    #            node = parent_stack.pop()
+        return stats
 
 
 cdef class Clusters:
@@ -783,6 +786,9 @@ cdef class QuickBundles(object):
         self.features_flip = np.empty(features_shape, dtype=DTYPE)
         self.bvh = bvh
 
+        self.stats.nb_mdf_calls = 0
+        self.stats.nb_aabb_calls = 0
+
     cdef NearestCluster find_nearest_cluster(QuickBundles self, Data2D features) nogil except *:
         """ Finds the nearest cluster of a datum given its `features` vector.
 
@@ -815,8 +821,10 @@ cdef class QuickBundles(object):
 
             for k in range(self.clusters.c_size()):
 
+                self.stats.nb_aabb_calls += 1
                 if aabb_overlap(self.clusters.centroids[k].aabb, &aabb[0]) == 1:
 
+                    self.stats.nb_mdf_calls += 1
                     dist = self.metric.c_dist(self.clusters.centroids[k].features, features)
 
                     # Keep track of the nearest cluster
@@ -911,6 +919,12 @@ cdef class QuickBundles(object):
 
         """
         self.clusters.c_update(cluster_id)
+
+    def get_stats(self):
+        stats = {'nb_mdf_calls': self.stats.nb_mdf_calls,
+                 'nb_aabb_calls': self.stats.nb_aabb_calls}
+
+        return stats
 
 def evaluate_aabbb_checks():
     cdef:
