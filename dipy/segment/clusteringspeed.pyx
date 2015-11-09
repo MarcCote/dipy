@@ -433,7 +433,7 @@ cdef class QuickBundlesX(object):
                 # Remove old point
                 node.updated_centroid[n, d] = node.centroid[n, d] - (centroid[n, d]/C)
                 # Add new point
-                node.updated_centroid[n, d] = node.centroid[n, d] + (updated_centroid[n, d]/C)
+                node.updated_centroid[n, d] += (updated_centroid[n, d]/C)
 
                 # Update child centroid
                 centroid[n, d] = updated_centroid[n, d]
