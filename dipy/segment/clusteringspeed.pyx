@@ -99,6 +99,7 @@ cdef CentroidNode* create_empty_node(Shape centroid_shape, float threshold) nogi
     cdef CentroidNode* node = <CentroidNode*> calloc(1, sizeof(CentroidNode))
     with gil:
         node.centroid = <float[:centroid_shape.dims[0], :centroid_shape.dims[1]]> calloc(centroid_shape.size, sizeof(float))
+        node.updated_centroid = <float[:centroid_shape.dims[0], :centroid_shape.dims[1]]> calloc(centroid_shape.size, sizeof(float))
 
     node.father = NULL
     node.children = NULL
@@ -405,51 +406,86 @@ cdef class QuickBundlesX(object):
 
         return node.nb_children-1
 
-    cdef void _update(self, CentroidNode* node) nogil:
+    cdef void _update(self, CentroidNode* node, CentroidNode* child) nogil:
         cdef int i, j
 
         # Update indices
-        node.size = 0
-        for i in range(node.nb_children):
-            node.size += node.children[i].size
-
-        node.indices = <int*> realloc(node.indices, node.size*sizeof(int))
-
-        cdef int cpt = 0
-        for i in range(node.nb_children):
-            for j in range(node.children[i].size):
-                node.indices[cpt] = node.children[i].indices[j]
-                cpt += 1
+        node.indices = <int*> realloc(node.indices, (node.size+1)*sizeof(int))
+        node.indices[node.size] = child.indices[child.size-1]
+        node.size += 1
 
         # Update centroid
-        cdef int n, d
-        cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
-        cdef int* flips = <int*> calloc(node.nb_children, sizeof(int))
-        # Check if some children centroids needs to be flipped according to the metric
-        # when comparing them with the one of the first child.
-        cdef double dist, dist_flip
-        cdef Data2D centroid = node.children[0].centroid
-        cdef Data2D centroid_flip = node.children[0].centroid[::-1]
-        flips[0] = 0
-        for i in range(1, node.nb_children):
-            self.stats.nb_mdf_calls_when_updating += 2
-            dist = self.metric.c_dist(node.children[i].centroid, centroid)
-            dist_flip = self.metric.c_dist(node.children[i].centroid, centroid_flip)
-            flips[i] = dist_flip < dist
+        cdef Data2D centroid = child.centroid
+        cdef Data2D updated_centroid = child.updated_centroid
+        cdef Data2D centroid_flip = child.centroid[::-1]
+        self.stats.nb_mdf_calls_when_updating += 2
+        dist = self.metric.c_dist(centroid, node.centroid)
+        dist_flip = self.metric.c_dist(centroid_flip, node.centroid)
 
+        if dist_flip < dist:
+            centroid = centroid_flip
+            updated_centroid = child.updated_centroid[::-1]
+
+        cdef int C = node.nb_children
+        cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
         for n in range(N):
             for d in range(D):
-                node.centroid[n, d] = 0
-                for i in range(node.nb_children):
-                    if flips[i]:
-                        node.centroid[n, d] += node.children[i].centroid[(N-1)-n, d]
-                    else:
-                        node.centroid[n, d] += node.children[i].centroid[n, d]
+                # Remove old point
+                node.updated_centroid[n, d] = node.centroid[n, d] - (centroid[n, d]/C)
+                # Add new point
+                node.updated_centroid[n, d] = node.centroid[n, d] + (updated_centroid[n, d]/C)
 
-                node.centroid[n, d] /= node.nb_children
+                # Update child centroid
+                centroid[n, d] = updated_centroid[n, d]
 
-        # Update AABB
-        aabb_creation(node.centroid, node.aabb)
+        # Update AABB of the child
+        aabb_creation(child.centroid, child.aabb)
+
+    #cdef void _update(self, CentroidNode* node) nogil:
+    #    cdef int i, j
+
+    #    # Update indices
+    #    node.size = 0
+    #    for i in range(node.nb_children):
+    #        node.size += node.children[i].size
+
+    #    node.indices = <int*> realloc(node.indices, node.size*sizeof(int))
+
+    #    cdef int cpt = 0
+    #    for i in range(node.nb_children):
+    #        for j in range(node.children[i].size):
+    #            node.indices[cpt] = node.children[i].indices[j]
+    #            cpt += 1
+
+    #    # Update centroid
+    #    cdef int n, d
+    #    cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
+    #    cdef int* flips = <int*> calloc(node.nb_children, sizeof(int))
+    #    # Check if some children centroids needs to be flipped according to the metric
+    #    # when comparing them with the one of the first child.
+    #    cdef double dist, dist_flip
+    #    cdef Data2D centroid = node.children[0].centroid
+    #    cdef Data2D centroid_flip = node.children[0].centroid[::-1]
+    #    flips[0] = 0
+    #    for i in range(1, node.nb_children):
+    #        self.stats.nb_mdf_calls_when_updating += 2
+    #        dist = self.metric.c_dist(node.children[i].centroid, centroid)
+    #        dist_flip = self.metric.c_dist(node.children[i].centroid, centroid_flip)
+    #        flips[i] = dist_flip < dist
+
+    #    for n in range(N):
+    #        for d in range(D):
+    #            node.centroid[n, d] = 0
+    #            for i in range(node.nb_children):
+    #                if flips[i]:
+    #                    node.centroid[n, d] += node.children[i].centroid[(N-1)-n, d]
+    #                else:
+    #                    node.centroid[n, d] += node.children[i].centroid[n, d]
+
+    #            node.centroid[n, d] /= node.nb_children
+
+    #    # Update AABB
+    #    aabb_creation(node.centroid, node.aabb)
 
     cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip) nogil:
         cdef Data2D element = streamline.features
@@ -462,7 +498,7 @@ cdef class QuickBundlesX(object):
         cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
         for n in range(N):
             for d in range(D):
-                node.centroid[n, d] = ((node.centroid[n, d] * C) + element[n, d]) / (C+1)
+                node.updated_centroid[n, d] = ((node.centroid[n, d] * C) + element[n, d]) / (C+1)
 
         node.indices = <int*> realloc(node.indices, (C+1)*sizeof(int))
         node.indices[C] = streamline.idx
@@ -507,7 +543,7 @@ cdef class QuickBundlesX(object):
             nearest_cluster.id = self._add_child_to(node)
 
         self._insert_in(node.children[nearest_cluster.id], streamline, nearest_cluster.flip)
-        self._update(node)
+        self._update(node, node.children[nearest_cluster.id])
 
     cdef void _insert(self, Streamline* streamline) nogil:
         # Create root if needed.
@@ -515,6 +551,15 @@ cdef class QuickBundlesX(object):
             self.root = create_empty_node(self.features_shape, self.thresholds[0])
 
         self._insert_in(self.root, streamline, 0)
+
+        # Update root centroid
+        cdef cnp.npy_intp N = self.root.centroid.shape[0], D = self.root.centroid.shape[1]
+        for n in range(N):
+            for d in range(D):
+                self.root.centroid[n, d] = self.root.updated_centroid[n, d]
+
+        # Update root AABB
+        aabb_creation(self.root.centroid, self.root.aabb)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
         self.metric.feature.c_extract(datum, self.features)
