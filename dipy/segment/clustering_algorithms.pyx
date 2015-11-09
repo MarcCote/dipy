@@ -59,7 +59,7 @@ def peek(iterable):
     return first, iterator
 
 
-def quickbundles_compactlist(streamlines, Metric metric, double threshold, long max_nb_clusters=BIGGEST_INT, ordering=None):
+def quickbundles_compactlist(streamlines, Metric metric, double threshold, long max_nb_clusters=BIGGEST_INT, ordering=None, bvh=False):
     if not isinstance(streamlines, Streamlines):
         raise ValueError("`streamlines` must be a ``Streamlines`` object")
 
@@ -77,7 +77,7 @@ def quickbundles_compactlist(streamlines, Metric metric, double threshold, long 
         return ClusterMapCentroid()
 
     features_shape = shape2tuple(metric.feature.c_infer_shape(streamlines[first_idx].astype(DTYPE)))
-    cdef QuickBundles qb = QuickBundles(features_shape, metric, threshold, max_nb_clusters)
+    cdef QuickBundles qb = QuickBundles(features_shape, metric, threshold, max_nb_clusters, bvh)
     cdef int idx, i
     cdef int cluster_id
     cdef int nb_streamlines = len(streamlines)
@@ -132,7 +132,7 @@ def quickbundles(streamlines, Metric metric, double threshold,
     """
 
     if isinstance(streamlines, Streamlines):
-        return quickbundles_compactlist(streamlines, metric, threshold, max_nb_clusters, ordering)
+        return quickbundles_compactlist(streamlines, metric, threshold, max_nb_clusters, ordering, bvh)
 
     # Threshold of np.inf is not supported, set it to 'biggest_double'
     threshold = min(threshold, BIGGEST_DOUBLE)
