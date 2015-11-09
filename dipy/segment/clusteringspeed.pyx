@@ -5,6 +5,8 @@ import numpy as np
 cimport numpy as cnp
 
 from dipy.segment.clustering import ClusterCentroid, ClusterMapCentroid
+from dipy.segment.clustering import TreeCluster, TreeClusterMap
+
 
 from libc.math cimport fabs
 from cythonutils cimport Data2D, Shape, shape2tuple, tuple2shape, same_shape
@@ -143,7 +145,7 @@ cdef class HierarchicalQuickBundles(object):
             free(self.root)
             self.root = NULL
 
-    cdef hqb_add_to_node(self, CentroidNode* node, Streamline* streamline, int flip):
+    cdef hqb_add_to_node(self, CentroidNode* node, StreamlineInfos* streamline, int flip):
 
         cdef Data2D element = streamline.features
         cdef int C = node.size
@@ -161,7 +163,7 @@ cdef class HierarchicalQuickBundles(object):
         node.indices[C] = streamline.idx
         node.size += 1
 
-    cdef int hqb_add_child(self, CentroidNode* node, Streamline* streamline):
+    cdef int hqb_add_child(self, CentroidNode* node, StreamlineInfos* streamline):
         #print "Adding child..."
         # Create new child.
         cdef CentroidNode* child = create_empty_node(node.centroid_shape, node.threshold/THRESHOLD_MULTIPLIER)
@@ -205,7 +207,7 @@ cdef class HierarchicalQuickBundles(object):
         # Update AABB
         aabb_creation(node.centroid, node.aabb)
 
-    cdef void hqb_insert(self, CentroidNode* node, Streamline* streamline):
+    cdef void hqb_insert(self, CentroidNode* node, StreamlineInfos* streamline):
         cdef:
             float dist, dist_flip
             cnp.npy_intp k
@@ -246,7 +248,7 @@ cdef class HierarchicalQuickBundles(object):
         self.hqb_insert(node.children[nearest_cluster.id], streamline)
         self.hqb_update(node)
 
-    cdef void _insert(self, Streamline* streamline):
+    cdef void _insert(self, StreamlineInfos* streamline):
 
         # Check if we have a root.
         if self.root == NULL:
@@ -335,7 +337,7 @@ cdef class HierarchicalQuickBundles(object):
         # Important: because the CentroidNode structure contains an uninitialized memview,
         # we need to zero-initialize the allocated memory (calloc or via memset),
         # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
-        cdef Streamline* streamline = <Streamline*> calloc(1, sizeof(Streamline))
+        cdef StreamlineInfos* streamline = <StreamlineInfos*> calloc(1, sizeof(StreamlineInfos))
         streamline.features = self.features
         streamline.features_flip = self.features_flip
         streamline.idx = datum_idx
@@ -356,6 +358,7 @@ cdef class HierarchicalQuickBundles(object):
 cdef class QuickBundlesX(object):
 
     def __init__(self, features_shape, levels_thresholds, Metric metric):
+        self.metric = metric
         self.features_shape = tuple2shape(features_shape)
 
         self.nb_levels = len(levels_thresholds)
@@ -364,20 +367,21 @@ cdef class QuickBundlesX(object):
         for i in range(self.nb_levels):
             self.thresholds[i] = levels_thresholds[i]
 
-        self.metric = metric
-        self.root = NULL
-
-        self.features = np.empty(features_shape, dtype=DTYPE)
-        self.features_flip = np.empty(features_shape, dtype=DTYPE)
-
+        self.root = create_empty_node(self.features_shape, self.thresholds[0])
         self.level = None
         self.clusters = None
 
         self.stats.stats_per_layer = <QuickBundlesXStatsLayer*> calloc(self.nb_levels, sizeof(QuickBundlesXStatsLayer))
         self.stats.nb_mdf_calls_when_updating = 0
 
+        # Important: because the CentroidNode structure contains an uninitialized memview,
+        # we need to zero-initialize the allocated memory (calloc or via memset),
+        # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
+        self.current_streamline = <StreamlineInfos*> calloc(1, sizeof(StreamlineInfos))
+        self.current_streamline.features = np.empty(features_shape, dtype=DTYPE)
+        self.current_streamline.features_flip = np.empty(features_shape, dtype=DTYPE)
+
     def __dealloc__(self):
-        print "Deallocating QuickBundlesX object..."
         self.traverse_postorder(self.root, self._dealloc_node)
         self.root = NULL
 
@@ -389,9 +393,12 @@ cdef class QuickBundlesX(object):
             free(self.stats.stats_per_layer)
             self.stats.stats_per_layer = NULL
 
-    cdef int _add_child_to(self, CentroidNode* node) nogil:
-        # Create new child.
-        cdef double threshold = 0.0
+        if self.current_streamline != NULL:
+            free(self.current_streamline)
+            self.current_streamline = NULL
+
+    cdef int _add_child(self, CentroidNode* node) nogil:
+        cdef double threshold = 0.0  # Leaf node doesn't need threshold.
         if node.level+1 < self.nb_levels:
             threshold = self.thresholds[node.level+1]
 
@@ -406,13 +413,13 @@ cdef class QuickBundlesX(object):
 
         return node.nb_children-1
 
-    cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip) nogil:
-        cdef Data2D element = streamline.features
+    cdef void _update_node(self, CentroidNode* node, StreamlineInfos* streamline_infos) nogil:
+        cdef Data2D element = streamline_infos.features
         cdef int C = node.size
         cdef cnp.npy_intp n, d
 
-        if flip:
-            element = streamline.features_flip
+        if streamline_infos.use_flip:
+            element = streamline_infos.features_flip
 
         # Update centroid
         cdef cnp.npy_intp N = node.centroid.shape[0], D = node.centroid.shape[1]
@@ -422,19 +429,19 @@ cdef class QuickBundlesX(object):
 
         # Update list of indices
         node.indices = <int*> realloc(node.indices, (C+1)*sizeof(int))
-        node.indices[C] = streamline.idx
+        node.indices[C] = streamline_infos.idx
         node.size += 1
 
         # Update AABB
         aabb_creation(node.centroid, node.aabb)
 
-    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip) nogil:
+    cdef void _insert_in(self, CentroidNode* node, StreamlineInfos* streamline_infos) nogil:
         cdef:
             float dist, dist_flip
             cnp.npy_intp k
             NearestCluster nearest_cluster
 
-        self._add_streamline_to(node, streamline, flip)
+        self._update_node(node, streamline_infos)
 
         if node.level == self.nb_levels:
             return
@@ -446,9 +453,9 @@ cdef class QuickBundlesX(object):
         for k in range(node.nb_children):
             # Check streamline's aabb colides with the current child.
             self.stats.stats_per_layer[node.level].nb_aabb_calls += 1
-            if aabb_overlap(node.children[k].aabb, streamline.aabb, node.threshold):
+            if aabb_overlap(node.children[k].aabb, streamline_infos.aabb, node.threshold):
                 self.stats.stats_per_layer[node.level].nb_mdf_calls += 1
-                dist = self.metric.c_dist(node.children[k].centroid, streamline.features)
+                dist = self.metric.c_dist(node.children[k].centroid, streamline_infos.features)
 
                 # Keep track of the nearest cluster
                 if dist < nearest_cluster.dist:
@@ -457,7 +464,7 @@ cdef class QuickBundlesX(object):
                     nearest_cluster.flip = 0
 
                 self.stats.stats_per_layer[node.level].nb_mdf_calls += 1
-                dist_flip = self.metric.c_dist(node.children[k].centroid, streamline.features_flip)
+                dist_flip = self.metric.c_dist(node.children[k].centroid, streamline_infos.features_flip)
                 if dist_flip < nearest_cluster.dist:
                     nearest_cluster.dist = dist_flip
                     nearest_cluster.id = k
@@ -465,32 +472,18 @@ cdef class QuickBundlesX(object):
 
         if nearest_cluster.dist > node.threshold:
             # No near cluster, create a new one.
-            nearest_cluster.id = self._add_child_to(node)
+            nearest_cluster.id = self._add_child(node)
 
-        self._insert_in(node.children[nearest_cluster.id], streamline, nearest_cluster.flip)
-
-    cdef void _insert(self, Streamline* streamline) nogil:
-        # Create root if needed.
-        if self.root == NULL:
-            self.root = create_empty_node(self.features_shape, self.thresholds[0])
-
-        self._insert_in(self.root, streamline, 0)
+        streamline_infos.use_flip = nearest_cluster.flip
+        self._insert_in(node.children[nearest_cluster.id], streamline_infos)
 
     cpdef void insert(self, Data2D datum, int datum_idx):
-        self.metric.feature.c_extract(datum, self.features)
-        self.metric.feature.c_extract(datum[::-1], self.features_flip)
+        self.metric.feature.c_extract(datum, self.current_streamline.features)
+        self.metric.feature.c_extract(datum[::-1], self.current_streamline.features_flip)
+        self.current_streamline.idx = datum_idx
 
-        # Important: because the CentroidNode structure contains an uninitialized memview,
-        # we need to zero-initialize the allocated memory (calloc or via memset),
-        # otherwise during assignment CPython will try to call _PYX_XDEC_MEMVIEW on it and segfault.
-        cdef Streamline* streamline = <Streamline*> calloc(1, sizeof(Streamline))
-        streamline.features = self.features
-        streamline.features_flip = self.features_flip
-        streamline.idx = datum_idx
-
-        aabb_creation(streamline.features, streamline.aabb)
-        self._insert(streamline)
-        free(streamline)
+        aabb_creation(self.current_streamline.features, self.current_streamline.aabb)
+        self._insert_in(self.root, self.current_streamline)
 
     def __str__(self):
         #print "Printing tree..."
@@ -529,6 +522,20 @@ cdef class QuickBundlesX(object):
 
         self.traverse_postorder(self.root, self._fetch_level)
         return self.clusters
+
+    cdef object _build_tree_clustermap(self, CentroidNode* node):
+        cluster = ClusterCentroid(np.asarray(node.centroid))
+        cluster.indices = np.asarray(<int[:node.size]> node.indices)
+        tree_cluster = TreeCluster(cluster, node.threshold)
+
+        cdef int i
+        for i in range(node.nb_children):
+            tree_cluster.add(self._build_tree_clustermap(node.children[i]))
+
+        return tree_cluster
+
+    def get_tree_cluster_map(self):
+        return TreeClusterMap(self._build_tree_clustermap(self.root))
 
     def get_stats(self):
         stats_per_level = []

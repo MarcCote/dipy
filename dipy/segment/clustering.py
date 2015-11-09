@@ -165,6 +165,30 @@ class ClusterCentroid(Cluster):
         return converged
 
 
+class TreeCluster(Cluster):
+    def __init__(self, cluster, threshold, parent=None):
+        self._cluster = cluster
+        self.threshold = threshold
+        self.parent = parent
+        self.children = []
+
+    def add(self, child):
+        child.parent = self
+        self.children.append(child)
+
+    @property
+    def is_leaf(self):
+        return len(self.children) == 0
+
+    @property
+    def indices(self):
+        return self._cluster.indices
+
+    def __getitem__(self, idx):
+        """ Gets element(s) through indexing. """
+        return self._cluster[idx]
+
+
 class ClusterMap(object):
     """ Provides functionalities for interacting with clustering outputs.
 
@@ -384,6 +408,56 @@ class ClusterMapCentroid(ClusterMap):
     @property
     def centroids(self):
         return [cluster.centroid for cluster in self.clusters]
+
+
+class TreeClusterMap(ClusterMap):
+    def __init__(self, root):
+        self.root = root
+        self.leaves = []
+
+        def _retrieves_leaves(node):
+            if node.is_leaf:
+                self.leaves.append(node)
+
+        self.traverse_postorder(self.root, _retrieves_leaves)
+
+    @property
+    def refdata(self):
+        return self._refdata
+
+    @refdata.setter
+    def refdata(self, value):
+        if value is None:
+            value = Identity()
+
+        self._refdata = value
+
+        def _set_refdata(node):
+            node.refdata = self._refdata
+
+        self.traverse_postorder(self.root, _set_refdata)
+
+    def traverse_postorder(self, node, visit):
+        for child in node.children:
+            self.traverse_postorder(child, visit)
+
+        visit(node)
+
+    def iter_preorder(self, node):
+        parent_stack = []
+        while len(parent_stack) > 0 or node is not None:
+            if node is not None:
+                yield node
+                if len(node.children) > 0:
+                    parent_stack += node.children[1:]
+                    node = node.children[0]
+                else:
+                    node = None
+            else:
+                node = parent_stack.pop()
+
+    def __iter__(self):
+        return self.iter_preorder(self.root)
 
 
 class Clustering(object):

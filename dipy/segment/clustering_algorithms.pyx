@@ -211,3 +211,4 @@ def quickbundlesX(streamlines, Metric metric, thresholds, ordering=None):
         qbx.insert(streamline, idx)
 
     return qbx
+

@@ -15,11 +15,12 @@ cdef struct QuickBundlesXStats:
     QuickBundlesXStatsLayer* stats_per_layer
     int nb_mdf_calls_when_updating
 
-cdef struct Streamline:
+cdef struct StreamlineInfos:
     Data2D features
     Data2D features_flip
     float[6] aabb
     int idx
+    int use_flip
 
 
 cdef struct Centroid:
@@ -97,12 +98,13 @@ cdef class QuickBundlesX(object):
     cdef object level
     cdef object clusters
     cdef QuickBundlesXStats stats
+    cdef StreamlineInfos* current_streamline
 
-    cdef int _add_child_to(self, CentroidNode* node) nogil
-    cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip) nogil
-    cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip) nogil
-    cdef void _insert(self, Streamline* streamline) nogil
+    cdef int _add_child(self, CentroidNode* node) nogil
+    cdef void _update_node(self, CentroidNode* node, StreamlineInfos* streamline_infos) nogil
+    cdef void _insert_in(self, CentroidNode* node, StreamlineInfos* streamline_infos) nogil
     cpdef void insert(self, Data2D datum, int datum_idx)
     cdef void traverse_postorder(self, CentroidNode* node, void (*visit)(QuickBundlesX, CentroidNode*))
     cdef void _dealloc_node(self, CentroidNode* node)
     cdef void _fetch_level(self, CentroidNode* node)
+    cdef object _build_tree_clustermap(self, CentroidNode* node)
