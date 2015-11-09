@@ -436,7 +436,7 @@ cdef class QuickBundlesX(object):
                 node.updated_centroid[n, d] += (updated_centroid[n, d]/C)
 
                 # Update child centroid
-                centroid[n, d] = updated_centroid[n, d]
+                child.centroid[n, d] = child.updated_centroid[n, d]
 
         # Update AABB of the child
         aabb_creation(child.centroid, child.aabb)
