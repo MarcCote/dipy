@@ -40,7 +40,6 @@ cdef struct CentroidNode:
     CentroidNode** children
     int nb_children
     Data2D centroid
-    Data2D updated_centroid
     float[6] aabb
     float threshold
     int* indices
@@ -100,7 +99,6 @@ cdef class QuickBundlesX(object):
     cdef QuickBundlesXStats stats
 
     cdef int _add_child_to(self, CentroidNode* node) nogil
-    cdef void _update(self, CentroidNode* node, CentroidNode* child) nogil
     cdef void _add_streamline_to(self, CentroidNode* node, Streamline* streamline, int flip) nogil
     cdef void _insert_in(self, CentroidNode* node, Streamline* streamline, int flip) nogil
     cdef void _insert(self, Streamline* streamline) nogil
