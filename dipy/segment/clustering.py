@@ -165,11 +165,11 @@ class ClusterCentroid(Cluster):
         return converged
 
 
-class TreeCluster(Cluster):
-    def __init__(self, cluster, threshold, parent=None):
-        self._cluster = cluster
+class TreeCluster(ClusterCentroid):
+    def __init__(self, threshold, centroid, indices=None):
+        super(TreeCluster, self).__init__(centroid=centroid, indices=indices)
         self.threshold = threshold
-        self.parent = parent
+        self.parent = None
         self.children = []
 
     def add(self, child):
@@ -179,14 +179,6 @@ class TreeCluster(Cluster):
     @property
     def is_leaf(self):
         return len(self.children) == 0
-
-    @property
-    def indices(self):
-        return self._cluster.indices
-
-    def __getitem__(self, idx):
-        """ Gets element(s) through indexing. """
-        return self._cluster[idx]
 
 
 class ClusterMap(object):

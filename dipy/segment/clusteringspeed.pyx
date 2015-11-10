@@ -372,7 +372,6 @@ cdef class QuickBundlesX(object):
         self.clusters = None
 
         self.stats.stats_per_layer = <QuickBundlesXStatsLayer*> calloc(self.nb_levels, sizeof(QuickBundlesXStatsLayer))
-        self.stats.nb_mdf_calls_when_updating = 0
 
         # Important: because the CentroidNode structure contains an uninitialized memview,
         # we need to zero-initialize the allocated memory (calloc or via memset),
@@ -486,7 +485,6 @@ cdef class QuickBundlesX(object):
         self._insert_in(self.root, self.current_streamline)
 
     def __str__(self):
-        #print "Printing tree..."
         return print_node(self.root)
 
     cdef void traverse_postorder(self, CentroidNode* node, void (*visit)(QuickBundlesX, CentroidNode*)):
@@ -524,9 +522,9 @@ cdef class QuickBundlesX(object):
         return self.clusters
 
     cdef object _build_tree_clustermap(self, CentroidNode* node):
-        cluster = ClusterCentroid(np.asarray(node.centroid))
-        cluster.indices = np.asarray(<int[:node.size]> node.indices)
-        tree_cluster = TreeCluster(cluster, node.threshold)
+        tree_cluster = TreeCluster(threshold=node.threshold,
+                                   centroid=np.asarray(node.centroid),
+                                   indices=np.asarray(<int[:node.size]> node.indices))
 
         cdef int i
         for i in range(node.nb_children):
@@ -541,10 +539,10 @@ cdef class QuickBundlesX(object):
         stats_per_level = []
         for i in range(self.nb_levels):
             stats_per_level.append({'nb_mdf_calls': self.stats.stats_per_layer[i].nb_mdf_calls,
-                                    'nb_aabb_calls': self.stats.stats_per_layer[i].nb_aabb_calls})
+                                    'nb_aabb_calls': self.stats.stats_per_layer[i].nb_aabb_calls,
+                                    'threshold': self.thresholds[i]})
 
-        stats = {'stats_per_level': stats_per_level,
-                 'nb_mdf_calls_when_updating': self.stats.nb_mdf_calls_when_updating}
+        stats = {'stats_per_level': stats_per_level}
 
         return stats
 
@@ -888,6 +886,7 @@ cdef class QuickBundles(object):
                  'nb_aabb_calls': self.stats.nb_aabb_calls}
 
         return stats
+
 
 def evaluate_aabbb_checks():
     cdef:

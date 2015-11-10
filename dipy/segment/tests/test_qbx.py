@@ -178,20 +178,72 @@ def test_with_simulated_bundles2():
     qbx_class = QuickBundlesX(thresholds)
     print "Adding streamlines..."
     qbx = qbx_class.cluster(streamlines)
-    print qbx
 
     renderer.clear()
 
-    for level in range(len(thresholds) + 1):
-        clusters = qbx.get_clusters(level)
-        clusters_actor = actor.line(clusters.centroids)
-        renderer.add(clusters_actor)
-        window.show(renderer)
-        renderer.clear()
+    # for level in range(len(thresholds) + 1):
+    #     clusters = qbx.get_clusters(level)
+    #     clusters_actor = actor.line(clusters.centroids)
+    #     renderer.add(clusters_actor)
+    #     window.show(renderer)
+    #     renderer.clear()
+
+    from dipy.viz.clustering import show_hierarchical_clusters
+    tree = qbx.get_tree_cluster_map()
+    tree.refdata = streamlines
+    show_hierarchical_clusters(tree, show_circles=True)
 
     from ipdb import set_trace
     set_trace()
 
 
+def test_show_qbx():
+    filename = "/home/marc/research/dat/streamlines/MPI_Camille/myBrain.trk"
+    import nibabel as nib
+    print "Loading streamlines..."
+
+    import os
+    tmp_filename = "/tmp/streamlines.npz"
+    if os.path.isfile(tmp_filename):
+        streamlines = nib.streamlines.compact_list.load_compact_list(tmp_filename)
+    else:
+        streamlines = nib.streamlines.load(filename).streamlines[::100]
+        nib.streamlines.compact_list.save_compact_list(tmp_filename, streamlines)
+
+    print "Displaying {} streamlines...".format(len(streamlines))
+    #from dipy.viz import actor, window
+    #renderer = window.Renderer()
+    #bundle_actor = actor.line(streamlines)
+    #renderer.add(bundle_actor)
+    #window.show(renderer)
+
+    thresholds = [40, 30, 25, 20, 15]
+    qbx_class = QuickBundlesX(thresholds)
+    print "Clustering {} streamlines ({})...".format(len(streamlines), thresholds)
+    qbx = qbx_class.cluster(streamlines)
+
+    print "Displaying clusters graph..."
+    tree = qbx.get_tree_cluster_map()
+    tree.refdata = streamlines
+    from dipy.viz.clustering import show_clusters_graph
+    show_clusters_graph(tree)
+
+    from ipdb import set_trace as dbg
+    dbg()
+
+    clusters = qbx.get_clusters(len(thresholds))
+    clusters.refdata = streamlines
+
+    from dipy.viz.clustering import show_bundles
+    print "Displaying {} clusters...".format(len(clusters))
+
+    for level in range(1, len(thresholds) + 1):
+        print thresholds[level-1]
+        clusters = qbx.get_clusters(level)
+        clusters.refdata = streamlines
+        show_bundles(clusters)
+
+
 if __name__ == '__main__':
-    test_with_simulated_bundles2()
+    #test_with_simulated_bundles2()
+    test_show_qbx()

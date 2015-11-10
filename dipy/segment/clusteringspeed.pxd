@@ -3,17 +3,18 @@ from metricspeed cimport Metric
 
 
 cdef struct QuickBundlesStats:
-    int nb_mdf_calls
-    int nb_aabb_calls
+    long nb_mdf_calls
+    long nb_aabb_calls
 
 
 cdef struct QuickBundlesXStatsLayer:
-    int nb_mdf_calls
-    int nb_aabb_calls
+    long nb_mdf_calls
+    long nb_aabb_calls
+
 
 cdef struct QuickBundlesXStats:
     QuickBundlesXStatsLayer* stats_per_layer
-    int nb_mdf_calls_when_updating
+
 
 cdef struct StreamlineInfos:
     Data2D features
@@ -28,13 +29,16 @@ cdef struct Centroid:
     int size
     float[6] aabb
 
+
 cdef struct NearestCluster:
     int id
     double dist
     int flip
 
+
 cdef struct Test:
     Data2D centroid
+
 
 cdef struct CentroidNode:
     CentroidNode* father
@@ -47,7 +51,6 @@ cdef struct CentroidNode:
     int size
     Shape centroid_shape
     int level
-
 
 
 cdef class Clusters:
