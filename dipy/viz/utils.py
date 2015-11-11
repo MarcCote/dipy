@@ -88,6 +88,57 @@ def numpy_to_vtk_colors(colors):
     return vtk_colors
 
 
+def numpy_to_vtk_matrix(array):
+    """ Converts a numpy array to a VTK matrix.
+    """
+    if array is None:
+        return None
+
+    if array.shape == (4, 4):
+        matrix = vtk.vtkMatrix4x4()
+    elif array.shape == (3, 3):
+        matrix = vtk.vtkMatrix3x3()
+    else:
+        raise ValueError("Invalid matrix shape: {0}".format(array.shape))
+
+    for i in range(array.shape[0]):
+        for j in range(array.shape[1]):
+            matrix.SetElement(i, j, array[i, j])
+
+    return matrix
+
+
+def set_input(vtk_object, inp):
+    """ Generic input function which takes into account VTK 5 or 6
+
+    Parameters
+    ----------
+    vtk_object: vtk object
+    inp: vtkPolyData or vtkImageData or vtkAlgorithmOutput
+
+    Returns
+    -------
+    vtk_object
+
+    Notes
+    -------
+    This can be used in the following way::
+        from dipy.viz.utils import set_input
+        poly_mapper = set_input(vtk.vtkPolyDataMapper(), poly_data)
+    """
+    if isinstance(inp, vtk.vtkPolyData) \
+       or isinstance(inp, vtk.vtkImageData):
+        if vtk.VTK_MAJOR_VERSION <= 5:
+            vtk_object.SetInput(inp)
+        else:
+            vtk_object.SetInputData(inp)
+    elif isinstance(inp, vtk.vtkAlgorithmOutput):
+        vtk_object.SetInputConnection(inp)
+
+    vtk_object.Update()
+    return vtk_object
+
+
 def map_coordinates_3d_4d(input_array, indices):
     """ Evaluate the input_array data at the given indices
     using trilinear interpolation
@@ -472,3 +523,109 @@ def get_actor_from_polydata(polydata):
     """
     poly_mapper = get_polymapper_from_polydata(polydata)
     return get_actor_from_polymapper(poly_mapper)
+
+
+def auto_orient(actor, direction, bbox_type="OBB", data_up=None, ref_up=(0, 1, 0), show_bounds=False):
+    """ Orients an actor so its largest bounding box side is orthogonal to a
+    given direction.
+    This function returns a shallow copy of `actor` that have been automatically
+    oriented so that its largest bounding box (either OBB or AABB) side faces
+    the camera.
+    Parameters
+    ----------
+    actor : `vtkProp3D` object
+        Actor to orient.
+    direction : 3-tuple
+        Direction in which the largest bounding box side of the actor must be
+        orthogonal to.
+    bbox_type : str (optional)
+        Type of bounding to use. Choices are "OBB" for Oriented Bounding Box or
+        "AABB" for Axis-Aligned Bounding Box. Default: "OBB".
+    data_up : tuple (optional)
+        If provided, align this up vector with `ref_up` vector using rotation
+        around `direction` axis.
+    ref_up : tuple (optional)
+        Use to align `data_up` vector. Default: (0, 1, 0).
+    show_bounds : bool
+        Whether to display or not the actor bounds used by this function.
+        Default: False.
+    Returns
+    -------
+    `vtkProp3D` object
+        Shallow copy of `actor` that have been oriented accordingly to the
+        given options.
+    """
+    new_actor = vtk.vtkActor()
+    new_actor.ShallowCopy(actor)
+
+    if bbox_type == "AABB":
+        x1, x2, y1, y2, z1, z2 = new_actor.GetBounds()
+        width, height, depth = x2-x1, y2-y1, z2-z1
+        canonical_axes = (width, 0, 0), (0, height, 0), (0, 0, depth)
+        idx = np.argsort([width, height, depth])
+        coord_min = np.array(canonical_axes[idx[0]])
+        coord_mid = np.array(canonical_axes[idx[1]])
+        coord_max = np.array(canonical_axes[idx[2]])
+        corner = np.array((x1, y1, z1))
+    elif bbox_type == "OBB":
+        corner = np.zeros(3)
+        coord_max = np.zeros(3)
+        coord_mid = np.zeros(3)
+        coord_min = np.zeros(3)
+        sizes = np.zeros(3)
+
+        points = new_actor.GetMapper().GetInput().GetPoints()
+        vtk.vtkOBBTree.ComputeOBB(points, corner, coord_max, coord_mid, coord_min, sizes)
+    else:
+        raise ValueError("Unknown `bbox_type`: {0}".format(bbox_type))
+
+    if show_bounds:
+        from dipy.viz.actor import line
+        assembly = vtk.vtkAssembly()
+        assembly.AddPart(new_actor)
+        #assembly.AddPart(line([np.array([new_actor.GetCenter(), np.array(new_actor.GetCenter())+(0,0,20)])], colors=(1, 1, 0)))
+        assembly.AddPart(line([np.array([corner, corner+coord_max])], colors=(1, 0, 0)))
+        assembly.AddPart(line([np.array([corner, corner+coord_mid])], colors=(0, 1, 0)))
+        assembly.AddPart(line([np.array([corner, corner+coord_min])], colors=(0, 0, 1)))
+
+        # from dipy.viz.actor import axes
+        # local_axes = axes(scale=20)
+        # local_axes.SetPosition(new_actor.GetCenter())
+        # assembly.AddPart(local_axes)
+        new_actor = assembly
+
+    normal = np.cross(coord_mid, coord_max)
+
+    direction = normalized_vector(direction)
+    normal = normalized_vector(normal)
+    R = vec2vec_rotmat(normal, direction)
+    M = np.eye(4)
+    M[:3, :3] = R
+
+    transform = vtk.vtkTransform()
+    transform.PostMultiply()
+    transform.SetMatrix(numpy_to_vtk_matrix(M))
+
+    # TODO: I think we also need the right/depth vector in addition to the up vector for the data.
+    if data_up is not None:
+        # Find the rotation around `direction` axis to align top of the brain with the camera up.
+        data_up = normalized_vector(data_up)
+        ref_up = normalized_vector(ref_up)
+        up = np.dot(R, np.array(data_up))
+        up[2] = 0  # Orthogonal projection onto the XY-plane.
+        up = normalized_vector(up)
+
+        # Angle between oriented `data_up` and `ref_up`.
+        angle = np.arccos(np.dot(up, np.array(ref_up)))
+        angle = angle/np.pi*180.
+
+        # Check if the rotation should be clockwise or anticlockwise.
+        if up[0] < 0:
+            angle = -angle
+
+        transform.RotateWXYZ(angle, -direction)
+
+    # Apply orientation change to the new actor.
+    new_actor.AddOrientation(transform.GetOrientation())
+
+    return new_actor
