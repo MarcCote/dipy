@@ -246,7 +246,8 @@ def show_clusters_graph(tree, bg=(1, 1, 1), show=False, show_id=False):
 
         if node.color is not None:
             mean = np.mean([np.mean(s, axis=0) for s in node], axis=0)
-            stream_actor = actor.line([s - mean + node_pos for s in node], [node.color]*len(node), linewidth=2)
+            #stream_actor = actor.line([s - mean + node_pos for s in node], [node.color]*len(node), linewidth=2)
+            stream_actor = actor.streamtube([s - mean + node_pos for s in node], [node.color]*len(node), linewidth=1)
             #stream_actor = auto_orient(stream_actor, direction=(-1, 0, 0), bbox_type="AABB")
             #stream_actor.SetPosition(node_pos - stream_actor.GetCenter())
             renderer.add(stream_actor)
@@ -266,7 +267,8 @@ def show_clusters_graph(tree, bg=(1, 1, 1), show=False, show_id=False):
 
     _draw_subtree(tree.root)
 
-    renderer.add(actor.line(lines[0], colors.black, linewidth=1))
+    #renderer.add(actor.line(lines[0], colors.black, linewidth=1))
+    renderer.add(actor.streamtube(lines[0], colors.grey, linewidth=1, opacity=0.6))
 
     if show:
         window.show(renderer)
@@ -363,7 +365,8 @@ def show_clusters_tree_path(tree, path, bg=(1, 1, 1), show=False, show_id=False)
             mean = np.mean([np.mean(s, axis=0) for s in node], axis=0)
             #color = next(colormap)
             color = node.color
-            stream_actor = actor.line([s - mean + node_pos for s in node], [color]*len(node), linewidth=2)
+            #stream_actor = actor.line([s - mean + node_pos for s in node], [color]*len(node), linewidth=6)
+            stream_actor = actor.streamtube([s - mean + node_pos for s in node], [color]*len(node), linewidth=1)
             renderer.add(stream_actor)
 
         if node.parent is not None:
@@ -375,7 +378,8 @@ def show_clusters_tree_path(tree, path, bg=(1, 1, 1), show=False, show_id=False)
 
     _draw_subtree(tree.root)
 
-    renderer.add(actor.line(lines[0], colors.grey, linewidth=2, opacity=0.6))
+    #renderer.add(actor.line(lines[0], colors.grey, linewidth=3, opacity=0.6))
+    renderer.add(actor.streamtube(lines[0], colors.grey, linewidth=0.5, opacity=1))
 
     if show:
         window.show(renderer)
