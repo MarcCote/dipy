@@ -5,6 +5,7 @@ import numpy as np
 from dipy.viz.colormap import colormap_lookup_table
 from dipy.viz.utils import lines_to_vtk_polydata
 from dipy.viz.utils import set_input
+from dipy.viz.utils import numpy_to_vtk_matrix
 
 # Conditional import machinery for vtk
 from dipy.utils.optpkg import optional_package
@@ -539,3 +540,120 @@ def axes(scale=(1, 1, 1), colorx=(1, 0, 0), colory=(0, 1, 0), colorz=(0, 0, 1),
     ass.AddPart(arrowz)
 
     return ass
+
+
+def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
+            font_size=12, font_family='Arial', justification='center',
+            vertical_justification="middle",
+            bold=False, italic=False, shadow=False):
+
+    class TextActor3D(vtk.vtkTextActor3D):
+        def message(self, text):
+            self.set_message(text)
+
+        def set_message(self, text):
+            self.SetInput(text)
+            self._update_user_matrix()
+
+        def get_message(self):
+            return self.GetInput()
+
+        def font_size(self, size):
+            self.GetTextProperty().SetFontSize(24)
+            text_actor.SetScale((1./24.*size,)*3)
+            self._update_user_matrix()
+
+        def font_family(self, family='Arial'):
+            self.GetTextProperty().SetFontFamilyToArial()
+            #self._update_user_matrix()
+
+        def justification(self, justification):
+            tprop = self.GetTextProperty()
+            if justification == 'left':
+                tprop.SetJustificationToLeft()
+            elif justification == 'center':
+                tprop.SetJustificationToCentered()
+            elif justification == 'right':
+                tprop.SetJustificationToRight()
+            else:
+                raise ValueError("Unknown justification: '{}'".format(justification))
+
+            self._update_user_matrix()
+
+        def vertical_justification(self, justification):
+            tprop = self.GetTextProperty()
+            if justification == 'top':
+                tprop.SetVerticalJustificationToTop()
+            elif justification == 'middle':
+                tprop.SetVerticalJustificationToCentered()
+            elif justification == 'bottom':
+                tprop.SetVerticalJustificationToBottom()
+            else:
+                raise ValueError("Unknown vertical justification: '{}'".format(justification))
+
+            self._update_user_matrix()
+
+        def font_style(self, bold=False, italic=False, shadow=False):
+            tprop = self.GetTextProperty()
+            if bold:
+                tprop.BoldOn()
+            else:
+                tprop.BoldOff()
+            if italic:
+                tprop.ItalicOn()
+            else:
+                tprop.ItalicOff()
+            if shadow:
+                tprop.ShadowOn()
+            else:
+                tprop.ShadowOff()
+
+            self._update_user_matrix()
+
+        def color(self, color):
+            self.GetTextProperty().SetColor(*color)
+
+        def set_position(self, position):
+            self.SetPosition(position)
+
+        def get_position(self, position):
+            return self.GetPosition()
+
+        def _update_user_matrix(self):
+            """
+            Text justification of vtkTextActor3D doesn't seem to be working, so we do it manually.
+            """
+            user_matrix = np.eye(4)
+
+            text_bounds = [0, 0, 0, 0]
+            self.GetBoundingBox(text_bounds)
+
+            tprop = self.GetTextProperty()
+            if tprop.GetJustification() == vtk.VTK_TEXT_LEFT:
+                user_matrix[:3, -1] += (-text_bounds[0], 0, 0)
+            elif tprop.GetJustification() == vtk.VTK_TEXT_CENTERED:
+                user_matrix[:3, -1] += (-(text_bounds[0]+(text_bounds[1]-text_bounds[0])/2.), 0, 0)
+            elif tprop.GetJustification() == vtk.VTK_TEXT_RIGHT:
+                user_matrix[:3, -1] += (-text_bounds[1], 0, 0)
+
+            if tprop.GetVerticalJustification() == vtk.VTK_TEXT_BOTTOM:
+                user_matrix[:3, -1] += (0, -text_bounds[2], 0)
+            elif tprop.GetVerticalJustification() == vtk.VTK_TEXT_CENTERED:
+                user_matrix[:3, -1] += (0, -(text_bounds[2]+(text_bounds[3]-text_bounds[2])/2), 0)
+            elif tprop.GetVerticalJustification() == vtk.VTK_TEXT_TOP:
+                user_matrix[:3, -1] += (0, -text_bounds[3], 0)
+
+            user_matrix[:3, -1] *= self.GetScale()
+            self.SetUserMatrix(numpy_to_vtk_matrix(user_matrix))
+
+    text_actor = TextActor3D()
+    text_actor.message(text)
+    text_actor.font_size(font_size)
+    text_actor.set_position(position)
+    text_actor.font_family(font_family)
+    text_actor.font_style(bold, italic, shadow)
+    text_actor.color(color)
+    text_actor.justification(justification)
+    text_actor.vertical_justification(vertical_justification)
+
+    return text_actor

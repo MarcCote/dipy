@@ -6,7 +6,7 @@ from itertools import izip
 from dipy.viz import actor, window
 
 from dipy.tracking.streamline import get_bounding_box_streamlines
-#from dipy.viz import fvtk
+from dipy.viz import fvtk
 from dipy.viz.fvtk import colors
 from dipy.viz.colormap import distinguishable_colormap
 
@@ -192,7 +192,7 @@ def show_clusters_graph_progress(tree, max_indices, bg=(1, 1, 1), show=False):
         yield renderer
 
 
-def show_clusters_graph(tree, bg=(1, 1, 1), show=False):
+def show_clusters_graph(tree, bg=(1, 1, 1), show=False, show_id=False):
     import networkx as nx
 
     renderer = window.Renderer()
@@ -224,6 +224,7 @@ def show_clusters_graph(tree, bg=(1, 1, 1), show=False):
 
     _build_graph(tree.root)
     positions = nx.graphviz_layout(G, prog='twopi', args='')
+    #positions = hierarchy_pos(G, 0)
 
     # def _add_siblings(node):
     #     for i in range(1, len(node.children)):
@@ -254,12 +255,127 @@ def show_clusters_graph(tree, bg=(1, 1, 1), show=False):
             parent_pos = np.hstack([positions[node.parent.id], 0]) * scaling
             lines[0].append(np.array([parent_pos, node_pos]))
 
+            if show_id:
+                #fvtk.label(renderer, text=str(node.id), pos=node_pos+np.array([10, 10, 0]), scale=50, color=(0, 0, 0))
+                renderer.add(actor.text_3d(text=str(node.id),
+                                           position=node_pos+(parent_pos-node_pos)/2.,
+                                           color=(0, 0, 0)))
+
         for child in node.children:
             _draw_subtree(child)
 
     _draw_subtree(tree.root)
 
     renderer.add(actor.line(lines[0], colors.black, linewidth=1))
+
+    if show:
+        window.show(renderer)
+
+    return renderer
+
+
+def hierarchy_pos(G, root, width=1., vert_gap = 0.2, vert_loc = 0, xcenter = 0.5 ):
+    '''If there is a cycle that is reachable from root, then result will not be a hierarchy.
+
+       G: the graph
+       root: the root node of current branch
+       width: horizontal space allocated for this branch - avoids overlap with other branches
+       vert_gap: gap between levels of hierarchy
+       vert_loc: vertical location of root
+       xcenter: horizontal location of root
+    '''
+
+    def h_recur(G, root, width=1., vert_gap = 0.2, vert_loc = 0, xcenter = 0.5,
+                  pos = None, parent = None, parsed = [] ):
+        if(root not in parsed):
+            parsed.append(root)
+            if pos == None:
+                pos = {root:(xcenter,vert_loc)}
+            else:
+                pos[root] = (xcenter, vert_loc)
+            neighbors = G.neighbors(root)
+            if parent != None:
+                neighbors.remove(parent)
+            if len(neighbors)!=0:
+                dx = width/len(neighbors)
+                nextx = xcenter - width/2 - dx/2
+                for neighbor in neighbors:
+                    nextx += dx
+                    pos = h_recur(G,neighbor, width = dx, vert_gap = vert_gap,
+                                        vert_loc = vert_loc-vert_gap, xcenter=nextx, pos=pos,
+                                        parent = root, parsed = parsed)
+        return pos
+
+    return h_recur(G, root, width=1., vert_gap = 0.2, vert_loc = 0, xcenter = 0.5)
+
+
+
+def show_clusters_tree_path(tree, path, bg=(1, 1, 1), show=False, show_id=False):
+    import networkx as nx
+
+    renderer = window.Renderer()
+    renderer.background(bg)
+
+    G = nx.Graph()
+    cpt = [0]
+
+    def _tag_node(node):
+        node.id = cpt[0]
+        cpt[0] += 1
+
+        indices = np.argsort(map(len, node.children))[::-1]
+        for idx in indices:
+            child = node.children[idx]
+            # if len(child) < 10:
+            #     continue
+            _tag_node(child)
+
+    _tag_node(tree.root)
+
+    def _build_graph(node, level=0):
+        for child in node.children:
+            # if len(child) < 10:
+            #     continue
+            #G.add_edge(node, child)
+
+            if child.id in path[level] or len(path[level]) == 0:
+                G.add_edge(node.id, child.id, constraint=False)
+                _build_graph(child, level+1)
+
+    _build_graph(tree.root)
+    positions = hierarchy_pos(G, 0)
+
+    scaling = 1500
+    lines = [[]]
+
+    global colormap
+    colormap = iter(distinguishable_colormap(bg=bg))
+
+    def _draw_subtree(node):
+        global colormap
+        if node.id not in positions:
+            return
+
+        # Draw node
+        node_pos = np.hstack([positions[node.id], 0]) * scaling
+
+        if node.color is not None:
+            mean = np.mean([np.mean(s, axis=0) for s in node], axis=0)
+            #color = next(colormap)
+            color = node.color
+            stream_actor = actor.line([s - mean + node_pos for s in node], [color]*len(node), linewidth=2)
+            renderer.add(stream_actor)
+
+        if node.parent is not None:
+            parent_pos = np.hstack([positions[node.parent.id], 0]) * scaling
+            lines[0].append(np.array([parent_pos, node_pos]))
+
+        for child in node.children:
+            _draw_subtree(child)
+
+    _draw_subtree(tree.root)
+
+    renderer.add(actor.line(lines[0], colors.grey, linewidth=2, opacity=0.6))
 
     if show:
         window.show(renderer)
