@@ -927,6 +927,97 @@ class StreamlinesVizu(object):
                     bundle.show_streamlines()
                 iren.force_render()
 
+            elif iren.event.key.lower() == "f1":
+                cam = self.ren.camera()
+                print("Cam Pos  : {}".format(cam.GetPosition()))
+                print("Cam Dist : {}".format(cam.GetDistance()))
+                print("Cam Roll : {}".format(cam.GetRoll()))
+                print("Cam Focal: {}".format(cam.GetFocalPoint()))
+
+                #print("Cam Pos: {}".format(cam.GetPosition()))
+
+            elif iren.event.key.lower() == "return":
+                if not self.drawing:
+                    self.drawing = True
+
+                else:
+                    self.drawing = False
+
+                    cam = self.ren.camera()
+                    print(self.ren.GetAspect())
+                    aspect = self.ren.GetAspect()[0] / self.ren.GetAspect()[1]
+                    M = cam.GetCompositeProjectionTransformMatrix(aspect, -1, 500)
+                    # M = cam.GetCompositeProjectionTransformMatrix(self.screen_size[0]/float(self.screen_size[1]), -0.1, 0.1)
+                    M = utils.vtk_matrix_to_numpy(M)
+
+                    print("M")
+                    print(M)
+
+                    if self.selected_bundle is not None:
+                        bundle = self.bundles[self.selected_bundle]
+                    else:
+                        bundle = self.bundles[self.root_bundle]
+
+                    streamlines = bundle.streamlines.copy()
+                    tractogram = Tractogram(streamlines, affine_to_rasmm=np.eye(4))
+                    # tractogram.apply_affine(np.linalg.inv(M))
+                    tractogram.apply_affine(M)
+
+                    # s_mean = streamlines._data.mean(axis=0)
+                    # s_min = streamlines._data.min(axis=0)
+                    # streamlines._data += s_min
+
+                    # from ipdb import set_trace as dbg
+                    # dbg()
+
+                    print ("Creating line actor")
+                    # Create a line actor
+                    streamline = tractogram.streamlines[1]
+                    print(streamline.min(axis=0))
+                    print(streamline.max(axis=0))
+                    points = vtk.vtkPoints()
+                    points.SetNumberOfPoints(len(streamline))
+                    points.Allocate(len(streamline))
+
+                    for i, pts in enumerate(streamline):
+                        points.InsertPoint(i, pts[0], pts[1], pts[2])
+
+                    cells = vtk.vtkCellArray()
+                    cells.Initialize()
+
+                    for i in range(len(streamline)-1):
+                        line = vtk.vtkLine()
+                        line.GetPointIds().SetId(0, i)
+                        line.GetPointIds().SetId(1, i+1)
+                        cells.InsertNextCell(line)
+
+                    poly = vtk.vtkPolyData()
+                    poly.Initialize()
+                    poly.SetPoints(points)
+                    poly.SetLines(cells)
+                    poly.Modified()
+
+                    coordinate = vtk.vtkCoordinate()
+                    coordinate.SetCoordinateSystemToViewport()
+                    # coordinate.SetCoordinateSystemToDisplay()
+                    # coordinate.SetCoordinateSystemToWorld()
+
+                    mapper = vtk.vtkPolyDataMapper2D()
+                    mapper.SetInputData(poly)
+                    mapper.SetTransformCoordinate(coordinate)
+                    mapper.ScalarVisibilityOn()
+                    mapper.SetScalarModeToUsePointData()
+                    mapper.Update()
+
+                    actor = vtk.vtkActor2D()
+                    actor.SetMapper(mapper);
+                    actor.GetProperty().SetLineWidth(2.0)
+                    actor.GetProperty().SetColor(1, 0.5, 0)
+                    self.ren.add(actor)
+
+
+                print("Drawing:", self.drawing)
+
             iren.event.abort()  # Stop propagating the event.
 
         self.iren.AddObserver("CharEvent", select_biggest_cluster_onchar_callback)
