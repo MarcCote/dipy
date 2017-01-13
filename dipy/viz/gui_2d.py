@@ -456,7 +456,7 @@ class TextBox2D(UI):
         ----------
         character : string
         """
-        if character.lower() == "return":
+        if character.lower() in ["return", "kp_enter"]:
             self.render_text(False)
             return True
         if character.lower() == "backspace":
@@ -709,9 +709,11 @@ class LineSlider2D(UI):
     Currently supports:
     - A disk on a line (a thin rectangle).
     - Setting disk position.
+    - Modifying the slider value as an input field
     """
     def __init__(self, line_width=5, inner_radius=0, outer_radius=10, center=(450, 20), length=200,
-                 initial_value=50, min_value=0, max_value=100, text_template="{value:.1f} ({ratio:.0%})"):
+                 initial_value=50, min_value=0, max_value=100, text_template="{value:.1f} ({ratio:.0%})",
+                 text_width=7):
 
         """
 
@@ -727,6 +729,8 @@ class LineSlider2D(UI):
             Center of the slider.
         length : int
             Length of the slider.
+        text_width : int
+            Length of the text in characters
         """
         super(LineSlider2D, self).__init__()
 
@@ -742,23 +746,26 @@ class LineSlider2D(UI):
         self.current_state = center[0]
         self.left_x_position = center[0] - length / 2
         self.right_x_position = center[0] + length / 2
+        self.ratio = (self.current_state - self.left_x_position) / length
 
         self.slider_line = None
         self.slider_disk = None
+        self.textbox = None
         self.text = None
 
-        self.build_actors(inner_radius=inner_radius, outer_radius=outer_radius)
+        self.build_actors(inner_radius=inner_radius, outer_radius=outer_radius, text_width=text_width)
 
         # Setting the disk position will also update everything.
         self.set_position(self.center)
 
-    def build_actors(self, inner_radius, outer_radius):
+    def build_actors(self, inner_radius, outer_radius, text_width):
         """ Builds required actors.
 
         Parameters
         ----------
         inner_radius: int
         outer_radius: int
+        text_width : int
         """
         self.slider_line = Rectangle2D(size=(self.length, self.line_width), center=self.center).actor
         self.slider_line.GetProperty().SetColor(1, 0, 0)
@@ -779,7 +786,9 @@ class LineSlider2D(UI):
         self.slider_disk = vtk.vtkActor2D()
         self.slider_disk.SetMapper(mapper)
 
-        self.text = TextActor2D()
+        # self.text = TextActor2D()
+        self.textbox = TextBox2D(text_width, 1, self.format_text())
+        self.text = self.textbox.actor
         self.text.set_position(position=(self.left_x_position-50, self.center[1]-10))
         self.text.font_size(size=16)
 
@@ -846,9 +855,9 @@ class LineSlider2D(UI):
         # Update text disk actor.
         self.slider_disk.SetPosition(self.current_state, self.center[1])
 
-        # Update text actor.
+        # Update textbox.
         text = self.format_text()
-        self.text.set_message(text=text)
+        self.textbox.set_message(text)
         offset_x = 8 * len(text) / 2.
         offset_y = 30
         self.text.SetPosition(self.current_state-offset_x, self.center[1] - offset_y)

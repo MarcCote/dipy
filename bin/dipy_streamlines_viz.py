@@ -523,6 +523,12 @@ class StreamlinesVizu(object):
             # iren: CustomInteractorStyle
             # obj: vtkActor picked
             # slider: LineSlider2D
+
+            # Reset textbox
+            textbox = slider.textbox.actor
+            if textbox in iren.active_props:
+                iren.remove_active_prop(textbox)
+
             position = iren.event.position
             slider.set_position(position)
 
@@ -535,11 +541,73 @@ class StreamlinesVizu(object):
             iren.force_render()
             iren.event.abort()  # Stop propagating the event.
 
+        # Slider textbox
+        def slider_textbox_select_callback(iren, obj, slider):
+            # iren: CustomInteractorStyle
+            # obj: vtkActor picked
+            # slider: LineSlider2D
+            iren.add_active_prop(slider.textbox.actor)
+            slider.textbox.set_message("")
+            slider.textbox.caret_pos = 0
+            slider.textbox.render_text(show_caret=True)
+            iren.force_render()
+
+        def slider_textbox_keypress_callback(iren, obj, slider):
+            # iren: CustomInteractorStyle
+            # obj: vtkActor picked
+            # slider: LineSlider2D
+
+            key = iren.event.key.lower()
+            textbox = slider.textbox
+
+            if key not in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "period", "backspace", "return", "kp_enter"]:
+                # Unauthorized key
+                pass
+            elif len(textbox.text) == 0 and key in ["return", "kp_enter"]:
+                # User pressed "enter" on empty field; reset textbox
+                iren.remove_active_prop(textbox.actor)
+                textbox.set_message(slider.format_text())
+            elif len(textbox.text) >= 4 and key not in ["backspace", "return", "kp_enter"]:
+                # Textbox is filled to max length
+                pass
+            else:
+                # Switch for period character
+                key = '.' if key == "period" else key
+
+                # Process keypress
+                is_done = textbox.handle_character(key)
+                if is_done:
+                    iren.remove_active_prop(textbox.actor)
+
+                    try:
+                        threshold = float(textbox.text)
+
+                        if threshold > slider.max_value:
+                            # Invalid value, reset textbox
+                            textbox.set_message(slider.format_text())
+                        elif self.last_threshold != threshold:
+                            slider.set_value(threshold)
+
+                            nb_bundles = self.bundles[self.selected_bundle].preview(threshold)
+                            self.last_threshold = threshold
+                            label.set_message("{} clusters".format(nb_bundles))
+
+                    except ValueError:
+                        # Invalid value, reset textbox
+                        textbox.set_message(slider.format_text())
+
+            iren.force_render()
+            iren.event.abort()  # Stop propagating the event.
+
         slider = gui_2d.LineSlider2D(length=1000, text_template="{value:.1f}mm")
         slider.add_callback("LeftButtonPressEvent", disk_move_callback, slider.slider_line)
         slider.add_callback("LeftButtonPressEvent", disk_press_callback, slider.slider_disk)
         slider.add_callback("MouseMoveEvent", disk_move_callback, slider.slider_disk)
         slider.add_callback("MouseMoveEvent", disk_move_callback, slider.slider_line)
+
+        slider.add_callback("KeyPressEvent", slider_textbox_keypress_callback, slider.text)
+        slider.add_callback("LeftButtonPressEvent", slider_textbox_select_callback, slider.text)
+
         panel.add_element(slider, (0.5, 0.5))
         panel.slider = slider
 
@@ -550,7 +618,6 @@ class StreamlinesVizu(object):
 
             if iren.event.key.lower() == "space":
                 toggle_other_bundles_visibility(iren)
-
 
         self.iren.AddObserver("CharEvent", toggle_visibility_onchar_callback)
 
