@@ -1,4 +1,6 @@
 #! /usr/bin/env python
+import collections
+
 import os
 import numpy as np
 import textwrap
@@ -33,7 +35,7 @@ def build_args_parser():
     C: hide centroids (and show streamlines)
     a: (accept) send selected streamlines in the inliers bundle
     r: (reject) send selected streamlines in the outliers bundle
-    * There is no undo.
+    u: (undo) undo last like/dislike action (Note : Be careful, undo memory is cleared after a save/reset)
     ** Don't forget to save (floppy disk icon)
     """)
     p = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
@@ -56,6 +58,8 @@ def build_args_parser():
     p.add_argument("--default-clustering-threshold", type=float,
                    help="Threshold used when the cluserting panel opens. "
                         "Default: high threshold producing only one cluster")
+
+    p.add_argument("--undo-memory-size", type=int, help="Number of clusters to hold in the undo memory")
 
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose mode.")
 
@@ -229,7 +233,8 @@ class Bundle(object):
 
 class StreamlinesVizu(object):
     # def __init__(self, tractogram_filename, savedir="./", screen_size=(1024, 768)):
-    def __init__(self, tractogram, anat=None, prefix="", screen_size=(1360, 768), default_clustering_threshold=None, verbose=False):
+    def __init__(self, tractogram, anat=None, prefix="", screen_size=(1360, 768), default_clustering_threshold=None, undo_memory_size=2,
+                 verbose=False):
         self.prefix = prefix
         self.savedir = os.path.dirname(pjoin(".", self.prefix))
         self.screen_size = screen_size
@@ -238,6 +243,7 @@ class StreamlinesVizu(object):
 
         self.inliers = Tractogram(affine_to_rasmm=np.eye(4))
         self.outliers = Tractogram(affine_to_rasmm=np.eye(4))
+        self.undo_memory = collections.deque(maxlen=undo_memory_size)
         self.cpt = None  # Used for iterating through the clusters.
 
         self.bundles = {}
@@ -388,6 +394,10 @@ class StreamlinesVizu(object):
             bundle = self.bundles[self.selected_bundle]
             print("Liking {} streamlines...".format(len(bundle.streamlines)))
 
+            # Memorize action
+            action_to_memorize = {"action": "like", "bundle_name": bundle_name, "bundle": bundle}
+            self.undo_memory.append(action_to_memorize)
+
             # Keep its streamlines in a tractogram of outliers.
             self.inliers.streamlines.extend(bundle.streamlines)
 
@@ -413,6 +423,10 @@ class StreamlinesVizu(object):
             bundle = self.bundles[self.selected_bundle]
             print("Disliking {} streamlines...".format(len(bundle.streamlines)))
 
+            # Memorize action
+            action_to_memorize = {"action": "dislike", "bundle_name": bundle_name, "bundle": bundle}
+            self.undo_memory.append(action_to_memorize)
+
             # Keep its streamlines in a tractogram of outliers.
             self.outliers.streamlines.extend(bundle.streamlines)
 
@@ -432,20 +446,52 @@ class StreamlinesVizu(object):
         dislike_button.add_callback("LeftButtonReleaseEvent", dislike_button_callback)
         panel.add_element(dislike_button, (0.5, 0.25))
 
+        def undo():
+            print("Trying to undo last action...")
+            try:
+                memory = self.undo_memory.pop()
+            except IndexError:
+                print("Memory empty, cannot undo...")
+                return
+
+            action = memory["action"]
+            bundle_name = memory["bundle_name"]
+            bundle = memory["bundle"]
+
+            if action == "like":
+                self.inliers._set_streamlines(self.inliers.streamlines[:-len(bundle.streamlines)])
+                action_msg = "Liking"
+            elif action == "dislike":
+                self.outliers._set_streamlines(self.outliers.streamlines[:-len(bundle.streamlines)])
+                action_msg = "Disliking"
+            else:
+                print("WARNING: Unrecognized saved action, ignoring undo request")
+                return
+
+            print("Undid last action : {} {} streamlines".format(action_msg, len(bundle.streamlines)))
+
+            self.add_bundle(bundle_name, bundle)
+            self.select(bundle_name)
+
         # Add shortcut keys.
-        def like_dislike_onchar_callback(iren, evt_name):
+        def like_dislike_undo_onchar_callback(iren, evt_name):
+            key = iren.event.key
+
+            if key == "u":
+                undo()
+
             if self.selected_bundle is None:
                 return
 
-            if iren.event.key == "r":
+            if key == "r":
                 dislike_bundle()
-            elif iren.event.key == "a":
+            elif key == "a":
                 like_bundle()
 
             iren.force_render()
             iren.event.abort()  # Stop propagating the event.
 
-        self.iren.AddObserver("CharEvent", like_dislike_onchar_callback)
+        self.iren.AddObserver("CharEvent", like_dislike_undo_onchar_callback)
 
         return panel
 
@@ -738,6 +784,9 @@ class StreamlinesVizu(object):
             if not os.path.isdir(self.savedir):
                 os.makedirs(self.savedir)
 
+            # Empty undo memory
+            self.undo_memory.clear()
+
             # Remove old clusters
             files = os.listdir(self.savedir)
             if "_inliers.tck" in files:
@@ -791,6 +840,9 @@ class StreamlinesVizu(object):
             # obj: vtkActor picked
             # button: Button2D
             print("Merging remaining bundles...")
+
+            # Empty undo memory
+            self.undo_memory.clear()
 
             streamlines = nib.streamlines.ArraySequence()
             for k, bundle in self.bundles.items():
@@ -917,6 +969,7 @@ def main():
     vizu = StreamlinesVizu(tractogram, anat=anat, prefix=prefix,
                            screen_size=tuple(args.screen_size),
                            default_clustering_threshold=args.default_clustering_threshold,
+                           undo_memory_size=args.undo_memory_size,
                            verbose=args.verbose)
     vizu.initialize_scene()
     vizu.run()
