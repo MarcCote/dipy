@@ -303,7 +303,7 @@ class StreamlinesVizu(object):
 
     def select_next(self):
         # Sort bundle according to their bundle size.
-        indices = np.argsort([len(self.bundles[k].streamlines) for k in self.keys]).tolist()[::-1]
+        indices = np.lexsort((self.keys, [len(self.bundles[k].streamlines) for k in self.keys])).tolist()[::-1]
 
         if self.selected_bundle is None:
             cpt = 0
@@ -316,7 +316,7 @@ class StreamlinesVizu(object):
 
     def select_previous(self):
         # Sort bundle according to their bundle size.
-        indices = np.argsort([len(self.bundles[k].streamlines) for k in self.keys]).tolist()[::-1]
+        indices = np.lexsort((self.keys, [len(self.bundles[k].streamlines) for k in self.keys])).tolist()[::-1]
 
         if self.selected_bundle is None:
             cpt = 0
