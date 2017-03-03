@@ -12,6 +12,12 @@ from nibabel.streamlines import Tractogram
 from dipy.data import fetch_viz_icons, read_viz_icons
 from dipy.fixes import argparse
 
+# Conditional import machinery for vtk
+from dipy.utils.optpkg import optional_package
+
+# Allow import, but disable doctests if we don't have vtk
+vtk, have_vtk, setup_module = optional_package('vtk')
+
 from dipy.segment.clustering import QuickBundles
 from dipy.segment.metric import ResampleFeature
 from dipy.segment.metric import AveragePointwiseEuclideanMetric as MDF
@@ -240,6 +246,7 @@ class StreamlinesVizu(object):
         self.screen_size = screen_size
         self.default_clustering_threshold = default_clustering_threshold
         self.verbose = verbose
+        self.drawing = False
 
         self.inliers = Tractogram(affine_to_rasmm=np.eye(4))
         self.outliers = Tractogram(affine_to_rasmm=np.eye(4))
@@ -903,7 +910,7 @@ class StreamlinesVizu(object):
         self._add_bundle_right_click_callback(self.bundles[self.root_bundle], self.root_bundle)
 
         # Add shortcut keys.
-        def select_biggest_cluster_onchar_callback(iren, evt_name):
+        def shortcut_keys_onchar_callback(iren, evt_name):
             if self.verbose:
                 print("Pressed {} (shift={}), (ctrl={}), (alt={})".format(
                     iren.event.key, iren.event.shift_key, iren.event.ctrl_key, iren.event.alt_key))
@@ -1020,7 +1027,89 @@ class StreamlinesVizu(object):
 
             iren.event.abort()  # Stop propagating the event.
 
-        self.iren.AddObserver("CharEvent", select_biggest_cluster_onchar_callback)
+        self.line_pts = []
+        self.drawing = False
+        self.iren.AddObserver("CharEvent", shortcut_keys_onchar_callback)
+
+        self.line_actor = None
+        def draw_line(iren, evt_name):
+            if not self.drawing:
+                return
+
+            iren.event.update(evt_name, iren.GetInteractor())
+            pos = iren.event.position
+            self.line_pts.append(tuple(pos))
+            print("Pts:", self.line_pts)
+
+            if self.line_actor is not None:
+                # self.ren.rm(self.line_actor)
+
+                # Add new click position to the list of points.
+                mapper = self.line_actor.GetMapper()
+                poly = mapper.GetInput()
+                points = poly.GetPoints()
+                points.InsertNextPoint(pos[0], pos[1], 0)
+
+                # Add new line segment.
+                lines = poly.GetLines()
+
+                nb_points = points.GetNumberOfPoints()
+                line = vtk.vtkLine()
+                line.GetPointIds().SetId(0, nb_points-2)
+                line.GetPointIds().SetId(1, nb_points-1)
+                lines.InsertNextCell(line)
+
+                # Update the renderer?
+                poly.Modified()
+            else:
+                print ("Creating line actor")
+                # Create a line actor
+                points = vtk.vtkPoints()
+                points.SetNumberOfPoints(len(self.line_pts))
+                points.Allocate(len(self.line_pts))
+
+                for i, pts in enumerate(self.line_pts):
+                    points.InsertPoint(i, pts[0], pts[1], 0)
+
+                cells = vtk.vtkCellArray()
+                cells.Initialize()
+
+                for i in range(len(self.line_pts)-1):
+                    line = vtk.vtkLine()
+                    line.GetPointIds().SetId(0, i)
+                    line.GetPointIds().SetId(1, i+1)
+                    cells.InsertNextCell(line)
+
+                poly = vtk.vtkPolyData()
+                poly.Initialize()
+                poly.SetPoints(points)
+                poly.SetLines(cells)
+                poly.Modified()
+
+                coordinate = vtk.vtkCoordinate()
+                coordinate.SetCoordinateSystemToDisplay()
+
+                mapper = vtk.vtkPolyDataMapper2D()
+                mapper.SetInputData(poly)
+                mapper.SetTransformCoordinate(coordinate)
+                mapper.ScalarVisibilityOn()
+                mapper.SetScalarModeToUsePointData()
+                mapper.Update()
+
+                actor = vtk.vtkActor2D()
+                actor.SetMapper(mapper);
+                actor.GetProperty().SetLineWidth(2.0)
+                actor.GetProperty().SetColor(1, 0, 0)
+                self.line_actor = actor
+
+                self.ren.add(self.line_actor)
+
+            # vtkRenderer *renderer = vtkRenderer::New();
+            # renderer->AddViewProp(this->distanceActor);
+
+        self.iren.AddObserver("LeftButtonPressEvent", draw_line)
+
+        self.ren.add(actor.axes((20,20,20)))
 
         # Add anatomy, if there is one.
         if self.anat is not None:
