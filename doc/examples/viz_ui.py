@@ -169,16 +169,23 @@ disk_slider.add_callback(disk_slider.handle,
                          rotate_red_cube)
 
 """
-2D File Select Menu
-==============
+2D Combo Box
+============
 """
 
-file_select_menu = ui.FileSelectMenu2D(size=(500, 500),
-                                       position=(300, 300),
-                                       font_size=16,
-                                       extensions=["py", "png"],
-                                       directory_path=os.getcwd(),
-                                       parent=None)
+values = list(map(str, range(1, 50+1)))
+listbox = ui.ListBox(values=values,
+                     position=(300, 300),
+                     size=(500, 500),
+                     multiselection=True)
+
+
+def _print_nb_selected_elements():
+    msg = "{}/{} elements are now selected."
+    print(msg.format(len(listbox.selected), len(listbox.values)))
+
+
+listbox.on_change = _print_nb_selected_elements
 
 """
 Adding Elements to the ShowManager
@@ -191,19 +198,20 @@ to be added to the show manager in the following manner.
 current_size = (600, 600)
 show_manager = window.ShowManager(size=current_size, title="DIPY UI Example")
 
-show_manager.ren.add(cube_actor_1)
-show_manager.ren.add(cube_actor_2)
-show_manager.ren.add(panel)
-show_manager.ren.add(text)
-show_manager.ren.add(line_slider)
-show_manager.ren.add(disk_slider)
-show_manager.ren.add(file_select_menu)
+# show_manager.ren.add(cube_actor_1)
+# show_manager.ren.add(cube_actor_2)
+# show_manager.ren.add(panel)
+# show_manager.ren.add(text)
+# show_manager.ren.add(line_slider)
+# show_manager.ren.add(disk_slider)
+# show_manager.ren.add(file_select_menu)
+show_manager.ren.add(listbox)
 show_manager.ren.reset_camera()
 show_manager.ren.reset_clipping_range()
 show_manager.ren.azimuth(30)
 
 # Uncomment this to start the visualisation
-# show_manager.start()
+show_manager.start()
 
 window.record(show_manager.ren, size=current_size, out_path="viz_ui.png")
 
