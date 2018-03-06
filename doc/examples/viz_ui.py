@@ -121,8 +121,8 @@ Panels
 Simply create a panel and add elements to it.
 """
 
-panel = ui.Panel2D(center=(440, 90), size=(300, 150), color=(1, 1, 1),
-                   align="right")
+panel = ui.Panel2D(size=(300, 150), color=(1, 1, 1), align="right")
+panel.set_center((440, 90))
 panel.add_element(button_example, (0.2, 0.2))
 panel.add_element(second_button_example, (480, 100))
 
@@ -173,11 +173,12 @@ disk_slider.add_callback(disk_slider.handle,
 ===========
 """
 
-values = list(map(str, range(1, 50+1)))
+values = list(map(str, range(1, 50 + 1)))
 listbox = ui.ListBox2D(values=values,
-                       position=(300, 300),
-                       size=(500, 500),
+                       position=(350, 250),
+                       size=(200, 300),
                        multiselection=True)
+
 
 def _print_nb_selected_elements():
     msg = "{}/{} elements are now selected."
@@ -185,6 +186,17 @@ def _print_nb_selected_elements():
 
 
 listbox.on_change = _print_nb_selected_elements
+
+"""
+2D File Select Menu
+==============
+"""
+
+filedialog = ui.FileDialog2D(size=(300, 200),
+                             position=(10, 100),
+                             font_size=16,
+                             extensions=["py", "png"],
+                             directory_path=os.getcwd())
 
 """
 Adding Elements to the ShowManager
@@ -204,12 +216,13 @@ show_manager.ren.add(text)
 show_manager.ren.add(line_slider)
 show_manager.ren.add(disk_slider)
 show_manager.ren.add(listbox)
+show_manager.ren.add(filedialog)
 show_manager.ren.reset_camera()
 show_manager.ren.reset_clipping_range()
 show_manager.ren.azimuth(30)
 
 # Uncomment this to start the visualisation
-# show_manager.start()
+show_manager.start()
 
 window.record(show_manager.ren, size=current_size, out_path="viz_ui.png")
 

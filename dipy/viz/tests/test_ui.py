@@ -10,6 +10,7 @@ from dipy.data import read_viz_icons, fetch_viz_icons
 from dipy.viz import ui
 from dipy.viz import window
 from dipy.data import DATA_DIR
+from nibabel.tmpdirs import TemporaryDirectory
 
 from dipy.viz.ui import UI
 
@@ -96,7 +97,7 @@ def test_broken_ui_component():
 @npt.dec.skipif(not have_vtk or skip_it)
 @xvfb_it
 def test_wrong_interactor_style():
-    panel = ui.Panel2D(center=(440, 90), size=(300, 150))
+    panel = ui.Panel2D(size=(300, 150))
     dummy_renderer = window.Renderer()
     dummy_show_manager = window.ShowManager(dummy_renderer,
                                             interactor_style='trackball')
@@ -105,12 +106,12 @@ def test_wrong_interactor_style():
 
 @npt.dec.skipif(not have_vtk or skip_it)
 @xvfb_it
-def test_rectangle_2d():
+def test_ui_rectangle_2d():
     window_size = (700, 700)
     show_manager = window.ShowManager(size=window_size)
 
     rect = ui.Rectangle2D(size=(100, 50))
-    rect.set_position((50, 80))
+    rect.position = (50, 80)
     npt.assert_equal(rect.position, (50, 80))
 
     rect.color = (1, 0.5, 0)
@@ -118,6 +119,9 @@ def test_rectangle_2d():
 
     rect.opacity = 0.5
     npt.assert_equal(rect.opacity, 0.5)
+
+    rect.border_color = (1, 0, 0)
+    npt.assert_equal(rect.border_color, (1, 0, 0))
 
     # Check the rectangle is drawn at right place.
     show_manager.ren.add(rect)
@@ -146,7 +150,6 @@ def test_ui_button_panel(recording=False):
 
     # Rectangle
     rectangle_test = ui.Rectangle2D(size=(10, 10))
-    rectangle_test.get_actors()
     another_rectangle_test = ui.Rectangle2D(size=(1, 1))
 
     # Button
@@ -187,10 +190,11 @@ def test_ui_button_panel(recording=False):
     text_block_test.color = (0, 0, 0)
 
     # Panel
-    panel = ui.Panel2D(center=(440, 90), size=(300, 150),
+    panel = ui.Panel2D(size=(300, 150),
+                       position=(290, 15),
                        color=(1, 1, 1), align="right")
     panel.add_element(rectangle_test, (290, 135))
-    panel.add_element(button_test, (0.2, 0.2))
+    panel.add_element(button_test, (0.1, 0.1))
     panel.add_element(text_block_test, (0.7, 0.7))
     npt.assert_raises(ValueError, panel.add_element, another_rectangle_test,
                       (10., 0.5))
@@ -293,7 +297,6 @@ def test_text_block_2d_justification():
     show_manager = window.ShowManager(size=window_size)
 
     # To help visualize the text positions.
-    lines = []
     grid_size = (500, 500)
     bottom, middle, top = 50, 300, 550
     left, center, right = 50, 300, 550
@@ -308,7 +311,8 @@ def test_text_block_2d_justification():
     grid_specs = [grid_top, grid_bottom, grid_left, grid_right,
                   grid_middle, grid_center]
     for spec in grid_specs:
-        line = ui.Rectangle2D(center=spec[0], size=spec[1], color=line_color)
+        line = ui.Rectangle2D(size=spec[1], color=line_color)
+        line.set_center(spec[0])
         show_manager.ren.add(line)
 
     font_size = 60
@@ -455,9 +459,9 @@ def test_ui_listbox_2d(recording=False):
     values = list(range(1, 42 + 1))
     listbox = ui.ListBox2D(values=values,
                            size=(500, 500),
-                           position=(300, 300),
                            multiselection=True,
                            reverse_scrolling=False)
+    listbox.set_center((300, 300))
 
     # We will collect the sequence of values that have been selected.
     selected_values = []
@@ -477,6 +481,7 @@ def test_ui_listbox_2d(recording=False):
     show_manager = window.ShowManager(size=(600, 600),
                                       title="DIPY ListBox")
     show_manager.ren.add(listbox)
+    # show_manager.start()
 
     if recording:
         # Record the following events:
@@ -515,6 +520,107 @@ def test_ui_listbox_2d(recording=False):
     assert_arrays_equal(selected_values, expected)
 
 
+@npt.dec.skipif(not have_vtk or skip_it)
+@xvfb_it
+def test_ui_filedialog_2d(recording=False):
+    filename = "test_ui_filedialog_2d"
+    recording_filename = pjoin(DATA_DIR, filename + ".log.gz")
+    expected_events_counts_filename = pjoin(DATA_DIR, filename + ".pkl")
+
+    def _assert_folders_appear_first(filedialog):
+        # Check that folders are listed before files.
+        is_directory = [v.is_directory for v in filedialog.values]
+        idx = sum(is_directory)
+        for v in filedialog.values[idx:]:
+            if v.is_directory:
+                return False
+
+        return True
+
+    with TemporaryDirectory() as tmpdir:
+        # Create the following temporary folders/files structure.
+        # /tmp/{tmpdir}/
+        # /tmp/{tmpdir}/file.txt/
+        # /tmp/{tmpdir}/folder_0/
+        # /tmp/{tmpdir}/folder_1/file_1.txt
+        # /tmp/{tmpdir}/folder_2/file_1.png
+        # /tmp/{tmpdir}/folder_2/file_2.txt
+        # /tmp/{tmpdir}/folder_3/subfolder_1/file_1.txt
+        os.makedirs(pjoin(tmpdir, "folder_0"))
+        os.makedirs(pjoin(tmpdir, "folder_1"))
+        os.makedirs(pjoin(tmpdir, "folder_2"))
+        os.makedirs(pjoin(tmpdir, "folder_3", "subfolder_1"))
+        with open(pjoin(tmpdir, "file.txt"), 'wt') as f:
+            f.write('some text')
+        with open(pjoin(tmpdir, "folder_1", "test_1.txt"), 'wt') as f:
+            f.write('some text')
+        with open(pjoin(tmpdir, "folder_2", "test_1.png"), 'wt') as f:
+            f.write('some text')
+        with open(pjoin(tmpdir, "folder_2", "test_2.txt"), 'wt') as f:
+            f.write('some text')
+        with open(pjoin(tmpdir, "folder_3", "subfolder_1", "file_1.txt"),
+                  'wt') as f:
+            f.write('some text')
+
+        # Show all files.
+        filedialog = ui.FileDialog2D(directory_path=tmpdir,
+                                     size=(500, 500))
+        filedialog.set_center((300, 300))
+
+        assert filedialog.current_directory == tmpdir
+        assert len(filedialog.selected) == 0
+        assert _assert_folders_appear_first(filedialog)
+
+        # Simulate going in folder2.
+        folder2_entry = filedialog.values[3]
+        assert folder2_entry.basename == "folder_2"
+        filedialog.select(folder2_entry)
+        assert len(filedialog.selected) == 0
+        assert filedialog.current_directory == pjoin(tmpdir, "folder_2")
+        assert _assert_folders_appear_first(filedialog)
+
+        # Show only .txt files.
+        filedialog = ui.FileDialog2D(directory_path=tmpdir,
+                                     size=(500, 500),
+                                     extensions=["txt"])
+        filedialog.set_center((300, 300))
+
+        # Simulate going in folder2.
+        filedialog.select(folder2_entry)
+        assert all([not v.basename.endswith(".png") for v in filedialog.values])
+
+        event_counter = EventCounter()
+        event_counter.monitor(filedialog)
+        for element in filedialog.panel._elements:
+            event_counter.monitor(element)
+
+        # Create a show manager and record/play events.
+        show_manager = window.ShowManager(size=(600, 600),
+                                          title="DIPY FileDialog")
+        show_manager.ren.add(filedialog)
+
+        if recording:
+            # Record the following events:
+            #  1. Click on 1
+            #  2. Ctrl + click on 2,
+            #  3. Ctrl + click on 2.
+            #  4. Click on down arrow (4 times).
+            #  5. Click on 21.
+            #  6. Click on up arrow (5 times).
+            #  7. Click on 1
+            #  8. Use mouse wheel to scroll down.
+            #  9. Shift + click on 42.
+            # 10. Use mouse wheel to scroll back up.
+            show_manager.record_events_to_file(recording_filename)
+            print(list(event_counter.events_counts.items()))
+            event_counter.save(expected_events_counts_filename)
+
+        else:
+            show_manager.play_events_from_file(recording_filename)
+            expected = EventCounter.load(expected_events_counts_filename)
+            event_counter.check_counts(expected)
+
+
 if __name__ == "__main__":
     if len(sys.argv) <= 1 or sys.argv[1] == "test_ui_button_panel":
         test_ui_button_panel(recording=True)
@@ -530,3 +636,6 @@ if __name__ == "__main__":
 
     if len(sys.argv) <= 1 or sys.argv[1] == "test_ui_listbox_2d":
         test_ui_listbox_2d(recording=True)
+
+    if len(sys.argv) <= 1 or sys.argv[1] == "test_ui_filedialog_2d":
+        test_ui_filedialog_2d(recording=True)
