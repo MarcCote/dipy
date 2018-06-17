@@ -192,6 +192,17 @@ Image Container
 
 img = ui.ImageContainer2D(img_path=read_viz_icons(fname='home3.png'))
 
+"""
+2D File Select Menu
+==============
+"""
+
+file_select_menu = ui.FileDialog2D(size=(500, 500),
+                                   position=(300, 300),
+                                   font_size=16,
+                                   extensions=["py", "png"],
+                                   directory_path=os.getcwd())
+
 
 """
 Adding Elements to the ShowManager
@@ -212,6 +223,7 @@ show_manager.ren.add(line_slider)
 show_manager.ren.add(ring_slider)
 show_manager.ren.add(listbox)
 show_manager.ren.add(img)
+show_manager.ren.add(file_select_menu)
 show_manager.ren.reset_camera()
 show_manager.ren.reset_clipping_range()
 show_manager.ren.azimuth(30)

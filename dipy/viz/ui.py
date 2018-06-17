@@ -1,7 +1,10 @@
 from __future__ import division
 from _warnings import warn
 
+import os
+import glob
 import numpy as np
+from os.path import join as pjoin
 
 from dipy.data import read_viz_icons
 from dipy.viz.interactor import CustomInteractorStyle
@@ -3023,12 +3026,12 @@ class ListBox2D(UI):
 
         # Add up and down buttons
         arrow_up = read_viz_icons(fname="arrow-up.png")
-        self.up_button = Button2D({"up": arrow_up})
+        self.up_button = Button2D([("up", arrow_up)])
         pos = self.panel.size - self.up_button.size // 2 - margin
         self.panel.add_element(self.up_button, pos, anchor="center")
 
         arrow_down = read_viz_icons(fname="arrow-down.png")
-        self.down_button = Button2D({"down": arrow_down})
+        self.down_button = Button2D([("down", arrow_down)])
         pos = (pos[0], self.up_button.size[1] // 2 + margin)
         self.panel.add_element(self.down_button, pos, anchor="center")
 
@@ -3303,3 +3306,144 @@ class ListBoxItem2D(UI):
         self.list_box.select(self, multiselect, range_select)
         i_ren.force_render()
         i_ren.event.abort()  # Stop propagating the event.
+
+
+class FileSelectMenu2D(UI):
+    """ A menu to select files or folders.
+
+    Can go to new folder, previous folder and select one or several
+    files/folders.
+
+    """
+
+    class _FileDialogEntry():
+        def __init__(self, basename, is_directory=False):
+            self.basename = basename
+            self.is_directory = is_directory
+            self._hash = hash(self.basename)
+
+        def __str__(self):
+            return self.basename
+
+    def __init__(self, size, font_size, position, extensions,
+                 directory_path, reverse_scrolling=False, line_spacing=1.4):
+        """
+        Parameters
+        ----------
+        size: (float, float)
+            The size of the system (x, y) in pixels.
+        font_size: int
+            The font size in pixels.
+        position: (float, float)
+            The initial position (x, y) in pixels.
+        reverse_scrolling: {True, False}
+            If True, scrolling up will move the list of files down.
+        line_spacing: float
+            Distance between menu text items in pixels.
+        extensions: list(string)
+            List of extensions to be shown as files.
+        directory_path: string
+            Path of the directory where this dialog should open.
+            Example: os.getcwd()
+
+        """
+        self.__size = size  # Temporary Hack
+        super(FileSelectMenu2D, self).__init__()
+
+        self.current_directory = os.path.abspath(directory_path)
+        self.extensions = extensions
+        self.listbox.position = position
+        self.listbox.reverse_scrolling = reverse_scrolling
+        self._update_listbox()
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Create the file selection component (ListBox).
+        """
+        self.listbox = ListBox2D([], size=self.__size)
+        self.listbox.on_change = self._handle_selection
+
+    def resize(self, size):
+        pass
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return self.listbox.actors
+
+    def _add_to_renderer(self, ren):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        ren : renderer
+        """
+        self.listbox.add_to_renderer(ren)
+
+    def _get_size(self):
+        return self.listbox.size
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.listbox.position = coords
+
+    def _get_entries(self):
+        """ Get all files and directories in the working directory.
+
+        Only retrieve files that match the specified extensions.
+
+        Returns
+        -------
+        entries: list of _FileDialogEntry's objects
+            A list of all files and directories found in the working directory.
+
+        """
+        # Retrieve folders.
+        directory_names = next(os.walk(self.current_directory))[1]
+        directory_names = ["../"] + directory_names
+
+        entries = []
+        for dirname in sorted(directory_names):
+            entry = FileSelectMenu2D._FileDialogEntry(dirname, is_directory=True)
+            entries.append(entry)
+
+        # Retrieve files.
+        for extension in self.extensions:
+            pattern = "*." + extension
+            filenames = glob.glob(pjoin(self.current_directory, pattern))
+            for filename in sorted(filenames):
+                filename = os.path.basename(filename)
+                entry = FileSelectMenu2D._FileDialogEntry(filename)
+                entries.append(entry)
+
+        return entries
+
+    def _handle_selection(self):
+        """ A callback to handle left click for this UI element.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        file_select_text: :class:`FileSelectMenuText2D`
+
+        """
+        assert len(self.listbox.selected) == 1
+        entry = self.listbox.selected[0]
+        if entry.is_directory:
+            self.current_directory = pjoin(self.current_directory,
+                                           entry.basename)
+            self.current_directory = os.path.abspath(self.current_directory)
+            self._update_listbox()
+
+    def _update_listbox(self):
+        self.listbox.values = self._get_entries()
+        self.listbox.update()
